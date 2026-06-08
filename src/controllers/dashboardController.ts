@@ -1,4 +1,5 @@
 import { Response } from "express";
+import mongoose from "mongoose";
 import { Office } from "../models/Office";
 import { Employee } from "../models/Employee";
 import { Advance } from "../models/Advance";
@@ -79,7 +80,13 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
     Office.countDocuments(
       req.user?.role === "super_admin"
         ? {}
-        : { _id: { $in: req.user?.assignedOfficeIds ?? [] } }
+        : {
+            _id: {
+              $in: (req.user?.assignedOfficeIds ?? []).map(
+                (id) => new mongoose.Types.ObjectId(id)
+              ),
+            },
+          }
     ),
     Employee.countDocuments(officeFilter),
     Employee.countDocuments({ ...officeFilter, status: EmployeeStatus.ACTIVE }),

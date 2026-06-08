@@ -156,12 +156,18 @@ export async function me(req: AuthRequest, res: Response): Promise<void> {
     "assignedOfficeIds",
     "name status"
   );
-  if (!user) {
+  if (!user || !user.isActive) {
     throw new AppError("User not found", 404);
   }
+
+  const accessToken = signAccessToken(buildTokenPayload(user));
+
   res.json({
     success: true,
-    data: serializeUser(user),
+    data: {
+      user: serializeUser(user),
+      accessToken,
+    },
   });
 }
 
