@@ -56,6 +56,7 @@ export async function createOffice(req: AuthRequest, res: Response): Promise<voi
 
 export async function updateOffice(req: AuthRequest, res: Response): Promise<void> {
   const id = String(req.params.id);
+  assertOfficeAccess(req, id);
   const parsed = officeSchema.partial().safeParse(req.body);
   if (!parsed.success) {
     throw new AppError("Invalid input");
@@ -78,6 +79,7 @@ export async function updateOffice(req: AuthRequest, res: Response): Promise<voi
 
 export async function deleteOffice(req: AuthRequest, res: Response): Promise<void> {
   const id = String(req.params.id);
+  assertOfficeAccess(req, id);
   const office = await Office.findByIdAndDelete(id);
   if (!office) {
     throw new AppError("Office not found", 404);

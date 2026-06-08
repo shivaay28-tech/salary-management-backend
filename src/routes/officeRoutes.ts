@@ -1,8 +1,9 @@
 import { Router } from "express";
 import * as officeController from "../controllers/officeController";
 import { authenticate } from "../middleware/auth";
-import { requireRoles } from "../middleware/rbac";
+import { requirePermission, requireRoles } from "../middleware/rbac";
 import { UserRole } from "../types/enums";
+import { Permission } from "../types/permissions";
 import { asyncHandler } from "../utils/asyncHandler";
 
 const router = Router();
@@ -19,7 +20,7 @@ router.post(
 );
 router.put(
   "/:id",
-  requireRoles(UserRole.SUPER_ADMIN),
+  requirePermission(Permission.OFFICES),
   asyncHandler(officeController.updateOffice)
 );
 router.delete(

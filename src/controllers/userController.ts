@@ -6,7 +6,33 @@ import { hashPassword } from "../utils/password";
 import { AuthRequest } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { logAudit } from "../services/auditService";
-import { ALL_PERMISSIONS, Permission } from "../types/permissions";
+import {
+  ALL_PERMISSIONS,
+  Permission,
+  resolvePermissions,
+} from "../types/permissions";
+
+function assertSubAdminScope(
+  req: AuthRequest,
+  assignedOfficeIds: string[],
+  permissions: Permission[]
+): void {
+  if (!req.user || req.user.role === UserRole.SUPER_ADMIN) return;
+
+  const creatorOffices = new Set(req.user.assignedOfficeIds);
+  for (const officeId of assignedOfficeIds) {
+    if (!creatorOffices.has(officeId)) {
+      throw new AppError("Cannot assign offices outside your scope", 403);
+    }
+  }
+
+  const creatorPerms = new Set(resolvePermissions(req.user.permissions));
+  for (const permission of permissions) {
+    if (!creatorPerms.has(permission)) {
+      throw new AppError(`Cannot grant permission: ${permission}`, 403);
+    }
+  }
+}
 
 const permissionSchema = z.array(
   z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]])
@@ -49,6 +75,12 @@ export async function createUser(req: AuthRequest, res: Response): Promise<void>
     throw new AppError("Email already in use", 409);
   }
 
+  assertSubAdminScope(
+    req,
+    parsed.data.assignedOfficeIds,
+    parsed.data.permissions
+  );
+
   const user = await User.create({
     name: parsed.data.name,
     email: parsed.data.email,
@@ -83,6 +115,13 @@ export async function updateUser(req: AuthRequest, res: Response): Promise<void>
   if (!user) {
     throw new AppError("Sub admin not found", 404);
   }
+
+  const nextOfficeIds =
+    parsed.data.assignedOfficeIds ??
+    user.assignedOfficeIds.map((id) => id.toString());
+  const nextPermissions = parsed.data.permissions ?? user.permissions;
+
+  assertSubAdminScope(req, nextOfficeIds, nextPermissions);
 
   if (parsed.data.name) user.name = parsed.data.name;
   if (parsed.data.email) user.email = parsed.data.email;
