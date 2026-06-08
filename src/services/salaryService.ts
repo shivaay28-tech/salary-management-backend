@@ -8,6 +8,7 @@ import {
   getActiveAdvancesForEmployee,
 } from "./advanceService";
 import { refreshPendingSalaryFromEmployee } from "./salaryRecalcService";
+import { applyDeferredCarryForward } from "./salaryDeferService";
 import { TokenPayload } from "../utils/jwt";
 
 export interface GenerateSalaryOptions {
@@ -49,6 +50,7 @@ export async function generateMonthlySalaries(
     if (exists) {
       if (exists.paidStatus === SalaryPaidStatus.PENDING) {
         await refreshPendingSalaryFromEmployee(exists, employee.monthlySalary);
+        await applyDeferredCarryForward(exists);
       }
       skipped++;
       continue;
@@ -59,24 +61,9 @@ export async function generateMonthlySalaries(
     const otherDeduction = options.otherDeduction ?? 0;
     const baseSalary = employee.monthlySalary;
 
-    const grossBeforeAdvance =
-      baseSalary + bonus + otherAddition - otherDeduction;
-
     const advances = await getActiveAdvancesForEmployee(employee._id.toString());
-    const { totalDeduction, allocations } = computeAdvanceDeduction(
-      advances,
-      Math.max(0, grossBeforeAdvance)
-    );
 
-    const finalSalary = calculateFinalSalary({
-      monthlySalary: baseSalary,
-      bonus,
-      otherAddition,
-      otherDeduction,
-      advanceDeduction: totalDeduction,
-    });
-
-    await SalaryRecord.create({
+    const record = await SalaryRecord.create({
       employeeId: employee._id,
       officeId: employee.officeId,
       month,
@@ -85,11 +72,35 @@ export async function generateMonthlySalaries(
       bonus,
       otherAddition,
       otherDeduction,
-      advanceDeduction: totalDeduction,
-      finalSalary,
+      advanceDeduction: 0,
+      finalSalary: 0,
       paidStatus: SalaryPaidStatus.PENDING,
       createdBy: new mongoose.Types.ObjectId(createdBy.userId),
     });
+
+    await applyDeferredCarryForward(record);
+
+    const grossBeforeAdvance =
+      baseSalary +
+      bonus +
+      otherAddition +
+      (record.deferredCarryForward ?? 0) -
+      otherDeduction;
+
+    const { totalDeduction, allocations } = computeAdvanceDeduction(
+      advances,
+      Math.max(0, grossBeforeAdvance)
+    );
+
+    record.advanceDeduction = totalDeduction;
+    record.finalSalary = calculateFinalSalary({
+      monthlySalary: baseSalary,
+      bonus,
+      otherAddition: otherAddition + (record.deferredCarryForward ?? 0),
+      otherDeduction,
+      advanceDeduction: totalDeduction,
+    });
+    await record.save();
     void allocations;
     created++;
   }

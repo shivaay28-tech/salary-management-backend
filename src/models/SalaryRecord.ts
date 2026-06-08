@@ -57,6 +57,12 @@ export interface ISalaryRecord extends Document {
   bankDetails?: ISalaryBankDetails;
   angadiyaDetails?: ISalaryAngadiyaDetails;
   remarks?: string;
+  deferredCarryForward?: number;
+  settledDeferredIds?: mongoose.Types.ObjectId[];
+  carriedToSalaryId?: mongoose.Types.ObjectId;
+  settledWithSalaryId?: mongoose.Types.ObjectId;
+  deferredUntilMonth?: number;
+  deferredUntilYear?: number;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -88,6 +94,12 @@ const salaryRecordSchema = new Schema<ISalaryRecord>(
     bankDetails: bankDetailsSchema,
     angadiyaDetails: angadiyaDetailsSchema,
     remarks: { type: String },
+    deferredCarryForward: { type: Number, default: 0, min: 0 },
+    settledDeferredIds: [{ type: Schema.Types.ObjectId, ref: "SalaryRecord" }],
+    carriedToSalaryId: { type: Schema.Types.ObjectId, ref: "SalaryRecord" },
+    settledWithSalaryId: { type: Schema.Types.ObjectId, ref: "SalaryRecord" },
+    deferredUntilMonth: { type: Number, min: 1, max: 12 },
+    deferredUntilYear: { type: Number, min: 2000 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   },
   { timestamps: true }

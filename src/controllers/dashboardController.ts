@@ -69,6 +69,8 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
     monthlySalaries,
     paidThisMonth,
     pendingThisMonth,
+    deferredThisMonth,
+    skippedThisMonth,
     recentSalaries,
     recentAdvances,
     recentEmployees,
@@ -114,7 +116,25 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
           paidStatus: SalaryPaidStatus.PENDING,
         },
       },
-      { $group: { _id: null, total: { $sum: "$finalSalary" } } },
+      { $group: { _id: null, total: { $sum: "$finalSalary" }, count: { $sum: 1 } } },
+    ]),
+    SalaryRecord.aggregate([
+      {
+        $match: {
+          ...salaryMonthFilter,
+          paidStatus: SalaryPaidStatus.DEFERRED,
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$finalSalary" }, count: { $sum: 1 } } },
+    ]),
+    SalaryRecord.aggregate([
+      {
+        $match: {
+          ...salaryMonthFilter,
+          paidStatus: SalaryPaidStatus.SKIPPED,
+        },
+      },
+      { $group: { _id: null, count: { $sum: 1 } } },
     ]),
     SalaryRecord.find(salaryMonthFilter)
       .populate("employeeId", "fullName")
@@ -153,6 +173,20 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
               ],
             },
           },
+          deferred: {
+            $sum: {
+              $cond: [
+                { $eq: ["$paidStatus", SalaryPaidStatus.DEFERRED] },
+                "$finalSalary",
+                0,
+              ],
+            },
+          },
+          skipped: {
+            $sum: {
+              $cond: [{ $eq: ["$paidStatus", SalaryPaidStatus.SKIPPED] }, 1, 0],
+            },
+          },
         },
       },
     ]),
@@ -175,6 +209,15 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
             $sum: {
               $cond: [
                 { $eq: ["$paidStatus", SalaryPaidStatus.PENDING] },
+                "$finalSalary",
+                0,
+              ],
+            },
+          },
+          deferred: {
+            $sum: {
+              $cond: [
+                { $eq: ["$paidStatus", SalaryPaidStatus.DEFERRED] },
                 "$finalSalary",
                 0,
               ],
@@ -220,7 +263,13 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
   const trendMap = new Map(
     salaryTrendRaw.map((s) => [
       `${s._id.month}-${s._id.year}`,
-      { total: s.total, paid: s.paid, pending: s.pending },
+      {
+        total: s.total,
+        paid: s.paid,
+        pending: s.pending,
+        deferred: s.deferred ?? 0,
+        skipped: s.skipped ?? 0,
+      },
     ])
   );
 
@@ -232,6 +281,8 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
       total: row?.total ?? 0,
       paid: row?.paid ?? 0,
       pending: row?.pending ?? 0,
+      deferred: row?.deferred ?? 0,
+      skipped: row?.skipped ?? 0,
     };
   });
 
@@ -244,6 +295,9 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
 
   const paidAmount = paidThisMonth[0]?.total ?? 0;
   const pendingAmount = pendingThisMonth[0]?.total ?? 0;
+  const deferredAmount = deferredThisMonth[0]?.total ?? 0;
+  const deferredCount = deferredThisMonth[0]?.count ?? 0;
+  const skippedCount = skippedThisMonth[0]?.count ?? 0;
 
   res.json({
     success: true,
@@ -261,6 +315,9 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
         totalOutstandingAdvances: outstandingAdvances[0]?.total ?? 0,
         paidSalaryThisMonth: paidAmount,
         pendingSalaryThisMonth: pendingAmount,
+        deferredSalaryThisMonth: deferredAmount,
+        deferredCountThisMonth: deferredCount,
+        skippedCountThisMonth: skippedCount,
         advancesThisMonth: advancesInMonth[0]?.total ?? 0,
       },
       charts: {
@@ -270,11 +327,14 @@ export async function getDashboard(req: AuthRequest, res: Response): Promise<voi
           total: o.total,
           paid: o.paid,
           pending: o.pending,
+          deferred: o.deferred ?? 0,
         })),
         advanceTrend,
         salaryStatus: {
           paid: paidAmount,
           pending: pendingAmount,
+          deferred: deferredAmount,
+          skipped: skippedCount,
         },
       },
       recent: {

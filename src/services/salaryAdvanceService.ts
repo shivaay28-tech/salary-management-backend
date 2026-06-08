@@ -6,6 +6,7 @@ import {
 import { SalaryPaidStatus, SalaryPaymentMode } from "../types/enums";
 import { calculateFinalSalary } from "../utils/salary";
 import { recalculateSalaryAdvances } from "./salaryRecalcService";
+import { settleDeferredOnPayment } from "./salaryDeferService";
 import { applyAdvanceRecoveries } from "./advanceService";
 import {
   computeAdvanceDeduction,
@@ -20,7 +21,8 @@ export function getGrossBeforeAdvance(record: ISalaryRecord): number {
   return (
     record.baseSalary +
     record.bonus +
-    record.otherAddition -
+    record.otherAddition +
+    (record.deferredCarryForward ?? 0) -
     record.otherDeduction
   );
 }
@@ -73,7 +75,7 @@ export async function applyAdvanceDeductionToSalary(
   record.finalSalary = calculateFinalSalary({
     monthlySalary: record.baseSalary,
     bonus: record.bonus,
-    otherAddition: record.otherAddition,
+    otherAddition: record.otherAddition + (record.deferredCarryForward ?? 0),
     otherDeduction: record.otherDeduction,
     advanceDeduction: totalDeduction,
   });
@@ -95,6 +97,9 @@ export async function paySalaryRecord(
 ): Promise<void> {
   if (record.paidStatus === SalaryPaidStatus.PAID) {
     throw new Error("Salary already paid");
+  }
+  if (record.paidStatus !== SalaryPaidStatus.PENDING) {
+    throw new Error("Only pending salaries can be paid");
   }
 
   if (!record.advanceDeductionManual && advanceDeductionOverride === undefined) {
@@ -128,6 +133,7 @@ export async function paySalaryRecord(
     }
   }
   await record.save();
+  await settleDeferredOnPayment(record, record.paidDate ?? new Date());
 
   if (allocations.length > 0) {
     await applyAdvanceRecoveries(allocations, {

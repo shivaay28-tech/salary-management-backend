@@ -16,6 +16,8 @@ export enum EmployeeStatus {
 export enum SalaryPaidStatus {
   PENDING = "pending",
   PAID = "paid",
+  DEFERRED = "deferred",
+  SKIPPED = "skipped",
 }
 
 export enum AdvanceRecoveryMode {

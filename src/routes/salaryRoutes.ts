@@ -10,11 +10,15 @@ const router = Router();
 router.use(authenticate, requirePermission(Permission.SALARIES));
 
 router.get("/", asyncHandler(salaryController.listSalaries));
+router.get("/deferred-statement", asyncHandler(salaryController.getDeferredStatement));
+router.get("/skipped-statement", asyncHandler(salaryController.getSkippedStatement));
 router.post("/generate", asyncHandler(salaryController.generateSalaries));
 router.post("/pay-all", asyncHandler(salaryController.markAllSalariesPaid));
 router.get("/:id/advance-info", asyncHandler(salaryController.getSalaryAdvanceInfo));
 router.get("/:id", asyncHandler(salaryController.getSalary));
 router.put("/:id", asyncHandler(salaryController.updateSalary));
+router.post("/:id/defer", asyncHandler(salaryController.deferSalary));
+router.post("/:id/skip", asyncHandler(salaryController.skipSalary));
 router.post("/:id/pay", asyncHandler(salaryController.markSalaryPaid));
 
 export default router;

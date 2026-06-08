@@ -12,6 +12,10 @@ import { sendExcel, sendExcelMultiSheet, sendPdf } from "../services/exportServi
 import { getDeductionHistoryByEmployee } from "../services/advanceDeductionHistoryService";
 import { hasCustomDateFilter, resolveReportPeriod } from "../utils/dateRange";
 import { SalaryPaidStatus } from "../types/enums";
+import {
+  buildDeferredSalaryStatement,
+  buildSkippedSalaryStatement,
+} from "../services/salaryDeferService";
 import type { IEmployee } from "../models/Employee";
 
 function filterExportSalariesByDate<
@@ -30,6 +34,8 @@ function filterExportSalariesByDate<
   return records.filter(
     (r) =>
       r.paidStatus === SalaryPaidStatus.PENDING ||
+      r.paidStatus === SalaryPaidStatus.DEFERRED ||
+      r.paidStatus === SalaryPaidStatus.SKIPPED ||
       (r.paidDate && r.paidDate >= start && r.paidDate <= end)
   );
 }
@@ -726,6 +732,201 @@ export async function exportAdvanceStatement(
       "Advance Statement",
       ["Employee", "Office", "Taken", "Recovered", "Outstanding"],
       summaryRows
+    );
+  }
+}
+
+const deferredExportSchema = exportQuerySchema.extend({
+  status: z.enum(["active", "settled", "all"]).optional(),
+});
+
+export async function exportDeferredStatement(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  const parsed = deferredExportSchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw new AppError("Invalid export parameters");
+  }
+
+  if (parsed.data.officeId) {
+    assertOfficeAccess(req, parsed.data.officeId);
+  }
+
+  const status = parsed.data.status ?? "active";
+  const data = await buildDeferredSalaryStatement(getOfficeIdFilter(req), {
+    officeId: parsed.data.officeId,
+    employeeId: req.query.employeeId ? String(req.query.employeeId) : undefined,
+    status,
+    month: status === "settled" ? parsed.data.month : undefined,
+    year: status === "settled" || status === "all" ? parsed.data.year : undefined,
+  });
+
+  const summaryRows = data.byEmployee.map((emp) => [
+    emp.fullName,
+    emp.mobileNumber,
+    emp.officeName,
+    emp.totalOutstanding,
+    emp.totalSettled,
+    emp.pendingCarryPeriod ?? "",
+    emp.pendingCarryAmount ?? "",
+    emp.pendingNetSalary ?? "",
+  ]);
+
+  const lineRows: (string | number)[][] = [];
+  for (const emp of data.byEmployee) {
+    for (const entry of emp.entries) {
+      lineRows.push([
+        emp.fullName,
+        emp.officeName,
+        entry.periodLabel,
+        entry.amount,
+        entry.lineStatus,
+        entry.carriedToPeriod ?? "",
+        entry.settledInPeriod ?? "",
+        entry.settledOn ?? "",
+        entry.remarks ?? "",
+      ]);
+    }
+  }
+
+  if (parsed.data.format === "excel") {
+    await sendExcelMultiSheet(res, "deferred-salary-statement.xlsx", [
+      {
+        name: "Summary",
+        headers: [
+          "Employee",
+          "Mobile",
+          "Office",
+          "Outstanding Deferred",
+          "Settled (History)",
+          "Pending Pay Period",
+          "Deferred In Pending",
+          "Pending Net Salary",
+        ],
+        rows: summaryRows,
+      },
+      {
+        name: "Deferred Lines",
+        headers: [
+          "Employee",
+          "Office",
+          "Deferred Period",
+          "Amount",
+          "Status",
+          "Carried To",
+          "Settled In",
+          "Settled On",
+          "Remarks",
+        ],
+        rows: lineRows,
+      },
+    ]);
+  } else {
+    sendPdf(
+      res,
+      "deferred-salary-statement.pdf",
+      "Deferred Salary Statement",
+      [
+        "Employee",
+        "Office",
+        "Outstanding",
+        "Settled",
+        "Pending Period",
+        "Carry Amount",
+      ],
+      data.byEmployee.map((emp) => [
+        emp.fullName,
+        emp.officeName,
+        emp.totalOutstanding,
+        emp.totalSettled,
+        emp.pendingCarryPeriod ?? "",
+        emp.pendingCarryAmount ?? "",
+      ])
+    );
+  }
+}
+
+export async function exportSkippedStatement(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  const parsed = deferredExportSchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw new AppError("Invalid export parameters");
+  }
+
+  if (parsed.data.officeId) {
+    assertOfficeAccess(req, parsed.data.officeId);
+  }
+
+  const data = await buildSkippedSalaryStatement(getOfficeIdFilter(req), {
+    officeId: parsed.data.officeId,
+    employeeId: req.query.employeeId ? String(req.query.employeeId) : undefined,
+    year: parsed.data.year,
+    month: parsed.data.month,
+  });
+
+  const summaryRows = data.byEmployee.map((emp) => [
+    emp.fullName,
+    emp.mobileNumber,
+    emp.officeName,
+    emp.skippedCount,
+    emp.totalWaived,
+  ]);
+
+  const lineRows: (string | number)[][] = [];
+  for (const emp of data.byEmployee) {
+    for (const entry of emp.entries) {
+      lineRows.push([
+        emp.fullName,
+        emp.officeName,
+        entry.periodLabel,
+        entry.waivedAmount,
+        entry.skippedAt ?? "",
+        entry.remarks ?? "",
+      ]);
+    }
+  }
+
+  if (parsed.data.format === "excel") {
+    await sendExcelMultiSheet(res, "skipped-salary-statement.xlsx", [
+      {
+        name: "Summary",
+        headers: [
+          "Employee",
+          "Mobile",
+          "Office",
+          "Skipped Months",
+          "Total Waived",
+        ],
+        rows: summaryRows,
+      },
+      {
+        name: "Skipped Lines",
+        headers: [
+          "Employee",
+          "Office",
+          "Period",
+          "Waived Amount",
+          "Skipped On",
+          "Reason",
+        ],
+        rows: lineRows,
+      },
+    ]);
+  } else {
+    sendPdf(
+      res,
+      "skipped-salary-statement.pdf",
+      "Skipped Salary Statement",
+      ["Employee", "Office", "Skipped Months", "Total Waived"],
+      data.byEmployee.map((emp) => [
+        emp.fullName,
+        emp.officeName,
+        emp.skippedCount,
+        emp.totalWaived,
+      ])
     );
   }
 }

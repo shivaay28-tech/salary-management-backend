@@ -53,6 +53,8 @@ function filterSalariesByPaidDate<
   return records.filter(
     (r) =>
       r.paidStatus === SalaryPaidStatus.PENDING ||
+      r.paidStatus === SalaryPaidStatus.DEFERRED ||
+      r.paidStatus === SalaryPaidStatus.SKIPPED ||
       (r.paidDate && r.paidDate >= start && r.paidDate <= end)
   );
 }
@@ -65,6 +67,53 @@ function periodMeta(parsed: ParsedPeriod) {
     dateFrom: parsed.dateFrom ?? start.toISOString().split("T")[0],
     dateTo: parsed.dateTo ?? end.toISOString().split("T")[0],
   };
+}
+
+function salaryPeriodOverlapsRange(
+  month: number,
+  year: number,
+  start: Date,
+  end: Date
+): boolean {
+  const periodStart = new Date(year, month - 1, 1);
+  const periodEnd = new Date(year, month, 0, 23, 59, 59, 999);
+  return periodStart <= end && periodEnd >= start;
+}
+
+function filterHistoryByScope<
+  T extends { month: number; year: number },
+>(
+  records: T[],
+  parsed: {
+    month?: number;
+    year?: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }
+): T[] {
+  if (hasCustomDateFilter(parsed)) {
+    const { start, end } = resolveReportPeriod({
+      month: parsed.month ?? 1,
+      year: parsed.year ?? new Date().getFullYear(),
+      dateFrom: parsed.dateFrom,
+      dateTo: parsed.dateTo,
+    });
+    return records.filter((r) =>
+      salaryPeriodOverlapsRange(r.month, r.year, start, end)
+    );
+  }
+
+  if (parsed.month && parsed.year) {
+    return records.filter(
+      (r) => r.month === parsed.month && r.year === parsed.year
+    );
+  }
+
+  if (parsed.year) {
+    return records.filter((r) => r.year === parsed.year);
+  }
+
+  return records;
 }
 
 export async function monthlySalaryReport(
@@ -94,8 +143,11 @@ export async function monthlySalaryReport(
   const totalSalary = records.reduce((s, r) => s + r.finalSalary, 0);
   const paidRecords = records.filter((r) => r.paidStatus === SalaryPaidStatus.PAID);
   const pendingRecords = records.filter((r) => r.paidStatus === SalaryPaidStatus.PENDING);
+  const deferredRecords = records.filter((r) => r.paidStatus === SalaryPaidStatus.DEFERRED);
+  const skippedRecords = records.filter((r) => r.paidStatus === SalaryPaidStatus.SKIPPED);
   const totalPaid = paidRecords.reduce((s, r) => s + r.finalSalary, 0);
   const totalPending = pendingRecords.reduce((s, r) => s + r.finalSalary, 0);
+  const totalDeferred = deferredRecords.reduce((s, r) => s + r.finalSalary, 0);
   const totalAdvances = records.reduce((s, r) => s + r.advanceDeduction, 0);
 
   const paymentModes = [
@@ -120,10 +172,13 @@ export async function monthlySalaryReport(
       totalEmployees: records.length,
       paidCount: paidRecords.length,
       pendingCount: pendingRecords.length,
+      deferredCount: deferredRecords.length,
+      skippedCount: skippedRecords.length,
       totalSalary,
       totalAdvances,
       totalPaid,
       totalPending,
+      totalDeferred,
       paymentBreakdown,
       records: records.map((r) => {
         const emp = r.employeeId as { fullName?: string; mobileNumber?: string } | null;
@@ -138,8 +193,10 @@ export async function monthlySalaryReport(
           otherAddition: r.otherAddition,
           otherDeduction: r.otherDeduction,
           advanceDeduction: r.advanceDeduction,
+          deferredCarryForward: r.deferredCarryForward ?? 0,
           finalSalary: r.finalSalary,
           paidStatus: r.paidStatus,
+          remarks: r.remarks,
           paymentMode: r.paymentMode,
           paidDate: r.paidDate,
         };
@@ -219,51 +276,93 @@ export async function employeeSalaryHistory(
   req: AuthRequest,
   res: Response
 ): Promise<void> {
-  const historySchema = periodSchema.extend({
+  const historySchema = z.object({
     employeeId: z.string().min(1),
+    month: z.coerce.number().min(1).max(12).optional(),
+    year: z.coerce.number().min(2000).optional(),
+    dateFrom: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    dateTo: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
   });
   const parsed = historySchema.safeParse(req.query);
   if (!parsed.success) {
-    throw new AppError("Employee, month and year required");
+    throw new AppError("Employee id required");
   }
 
-  const employee = await Employee.findById(parsed.data.employeeId);
+  const employee = await Employee.findById(parsed.data.employeeId).populate(
+    "officeId",
+    "name"
+  );
   if (!employee) {
     throw new AppError("Employee not found", 404);
   }
   assertOfficeAccess(req, employee.officeId.toString());
 
-  const recordFilter: Record<string, unknown> = {
+  const allRecords = await SalaryRecord.find({
     employeeId: parsed.data.employeeId,
-    month: parsed.data.month,
-    year: parsed.data.year,
-  };
+  })
+    .sort({ year: -1, month: -1 })
+    .select(
+      "month year baseSalary bonus otherAddition otherDeduction advanceDeduction deferredCarryForward finalSalary paidDate paidStatus paymentMode remarks settledWithSalaryId"
+    );
 
-  const records = filterSalariesByPaidDate(
-    await SalaryRecord.find(recordFilter)
-      .sort({ year: -1, month: -1 })
-      .select(
-        "month year baseSalary bonus otherAddition otherDeduction advanceDeduction finalSalary paidDate paidStatus paymentMode"
-      ),
-    parsed.data
+  const records = filterHistoryByScope(allRecords, parsed.data);
+
+  const paidRecords = records.filter((r) => r.paidStatus === SalaryPaidStatus.PAID);
+  const pendingRecords = records.filter(
+    (r) => r.paidStatus === SalaryPaidStatus.PENDING
+  );
+  const deferredRecords = records.filter(
+    (r) => r.paidStatus === SalaryPaidStatus.DEFERRED
+  );
+  const skippedRecords = records.filter(
+    (r) => r.paidStatus === SalaryPaidStatus.SKIPPED
   );
 
-  const totalEarned = records.reduce((s, r) => s + r.finalSalary, 0);
+  const totalPaid = paidRecords.reduce((s, r) => s + r.finalSalary, 0);
+  const totalPending = pendingRecords.reduce((s, r) => s + r.finalSalary, 0);
+  const totalDeferred = deferredRecords.reduce((s, r) => s + r.finalSalary, 0);
   const totalAdvanceDed = records.reduce((s, r) => s + r.advanceDeduction, 0);
+
+  const scopeLabel = hasCustomDateFilter(parsed.data)
+    ? `${parsed.data.dateFrom} – ${parsed.data.dateTo ?? parsed.data.dateFrom}`
+    : parsed.data.month && parsed.data.year
+      ? new Date(parsed.data.year, parsed.data.month - 1).toLocaleString("en", {
+          month: "long",
+          year: "numeric",
+        })
+      : parsed.data.year
+        ? String(parsed.data.year)
+        : "All time";
+
+  const off = employee.officeId as { name?: string } | null;
 
   res.json({
     success: true,
     data: {
-      ...periodMeta(parsed.data),
+      scope: scopeLabel,
+      year: parsed.data.year,
       employee: {
         id: employee._id,
         fullName: employee.fullName,
         mobileNumber: employee.mobileNumber,
         monthlySalary: employee.monthlySalary,
+        officeName: off?.name ?? "",
       },
       summary: {
         totalRecords: records.length,
-        totalEarned,
+        paidCount: paidRecords.length,
+        pendingCount: pendingRecords.length,
+        deferredCount: deferredRecords.length,
+        skippedCount: skippedRecords.length,
+        totalPaid,
+        totalPending,
+        totalDeferred,
         totalAdvanceDed,
       },
       history: records.map((r) => ({
@@ -274,10 +373,13 @@ export async function employeeSalaryHistory(
         otherAddition: r.otherAddition,
         otherDeduction: r.otherDeduction,
         advanceDeduction: r.advanceDeduction,
+        deferredCarryForward: r.deferredCarryForward ?? 0,
         netSalary: r.finalSalary,
         paidDate: r.paidDate,
         paidStatus: r.paidStatus,
         paymentMode: r.paymentMode,
+        remarks: r.remarks,
+        settledViaLaterMonth: Boolean(r.settledWithSalaryId),
       })),
     },
   });

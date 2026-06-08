@@ -16,6 +16,12 @@ import {
   getSalaryAdvanceSummary,
   paySalaryRecord,
 } from "../services/salaryAdvanceService";
+import {
+  buildDeferredSalaryStatement,
+  buildSkippedSalaryStatement,
+  deferSalaryRecord,
+  skipSalaryRecord,
+} from "../services/salaryDeferService";
 
 const updateSalarySchema = z.object({
   bonus: z.coerce.number().min(0).optional(),
@@ -72,6 +78,16 @@ const generateSchema = z.object({
   bonus: z.coerce.number().min(0).optional(),
   otherAddition: z.coerce.number().min(0).optional(),
   otherDeduction: z.coerce.number().min(0).optional(),
+});
+
+const deferSalarySchema = z.object({
+  remarks: z.string().optional(),
+  deferredUntilMonth: z.coerce.number().min(1).max(12).optional(),
+  deferredUntilYear: z.coerce.number().min(2000).optional(),
+});
+
+const skipSalarySchema = z.object({
+  remarks: z.string().min(1, "Reason is required"),
 });
 
 const payAllSchema = z.object({
@@ -214,8 +230,12 @@ export async function updateSalary(req: AuthRequest, res: Response): Promise<voi
   }
   assertOfficeAccess(req, record.officeId.toString());
 
-  if (record.paidStatus === SalaryPaidStatus.PAID) {
-    throw new AppError("Cannot edit a paid salary record", 400);
+  if (
+    record.paidStatus === SalaryPaidStatus.PAID ||
+    record.paidStatus === SalaryPaidStatus.DEFERRED ||
+    record.paidStatus === SalaryPaidStatus.SKIPPED
+  ) {
+    throw new AppError("Cannot edit this salary record", 400);
   }
 
   if (parsed.data.bonus !== undefined) record.bonus = parsed.data.bonus;
@@ -372,6 +392,121 @@ export async function markAllSalariesPaid(
       total: pending.length,
     },
   });
+}
+
+export async function getDeferredStatement(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  if (req.query.officeId) {
+    assertOfficeAccess(req, String(req.query.officeId));
+  }
+
+  const status =
+    req.query.status === "settled" || req.query.status === "all"
+      ? req.query.status
+      : "active";
+
+  const data = await buildDeferredSalaryStatement(getOfficeIdFilter(req), {
+    officeId: req.query.officeId ? String(req.query.officeId) : undefined,
+    employeeId: req.query.employeeId ? String(req.query.employeeId) : undefined,
+    status,
+    month: req.query.month ? Number(req.query.month) : undefined,
+    year: req.query.year ? Number(req.query.year) : undefined,
+  });
+
+  res.json({ success: true, data });
+}
+
+export async function getSkippedStatement(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  if (req.query.officeId) {
+    assertOfficeAccess(req, String(req.query.officeId));
+  }
+
+  const data = await buildSkippedSalaryStatement(getOfficeIdFilter(req), {
+    officeId: req.query.officeId ? String(req.query.officeId) : undefined,
+    employeeId: req.query.employeeId ? String(req.query.employeeId) : undefined,
+    year: req.query.year ? Number(req.query.year) : undefined,
+    month: req.query.month ? Number(req.query.month) : undefined,
+  });
+
+  res.json({ success: true, data });
+}
+
+export async function deferSalary(req: AuthRequest, res: Response): Promise<void> {
+  const parsed = deferSalarySchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError("Invalid input");
+  }
+
+  const record = await SalaryRecord.findById(String(req.params.id));
+  if (!record) {
+    throw new AppError("Salary record not found", 404);
+  }
+  assertOfficeAccess(req, record.officeId.toString());
+
+  try {
+    await deferSalaryRecord(
+      record,
+      parsed.data.remarks,
+      parsed.data.deferredUntilMonth,
+      parsed.data.deferredUntilYear
+    );
+  } catch (err) {
+    throw new AppError(err instanceof Error ? err.message : "Defer failed", 400);
+  }
+
+  if (req.user) {
+    await logAudit(req.user, "Salary Deferred", "salaries", {
+      salaryId: record._id,
+      month: record.month,
+      year: record.year,
+      amount: record.finalSalary,
+    });
+  }
+
+  const result = await SalaryRecord.findById(record._id)
+    .populate("employeeId", "fullName")
+    .populate("officeId", "name");
+
+  res.json({ success: true, data: result });
+}
+
+export async function skipSalary(req: AuthRequest, res: Response): Promise<void> {
+  const parsed = skipSalarySchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError(parsed.error.issues[0]?.message ?? "Invalid input");
+  }
+
+  const record = await SalaryRecord.findById(String(req.params.id));
+  if (!record) {
+    throw new AppError("Salary record not found", 404);
+  }
+  assertOfficeAccess(req, record.officeId.toString());
+
+  try {
+    await skipSalaryRecord(record, parsed.data.remarks);
+  } catch (err) {
+    throw new AppError(err instanceof Error ? err.message : "Skip failed", 400);
+  }
+
+  if (req.user) {
+    await logAudit(req.user, "Salary Skipped (Waived)", "salaries", {
+      salaryId: record._id,
+      month: record.month,
+      year: record.year,
+      remarks: parsed.data.remarks,
+    });
+  }
+
+  const result = await SalaryRecord.findById(record._id)
+    .populate("employeeId", "fullName")
+    .populate("officeId", "name");
+
+  res.json({ success: true, data: result });
 }
 
 export async function getSalary(req: AuthRequest, res: Response): Promise<void> {

@@ -16,5 +16,13 @@ router.get(
   "/advance-statement",
   asyncHandler(exportController.exportAdvanceStatement)
 );
+router.get(
+  "/deferred-statement",
+  asyncHandler(exportController.exportDeferredStatement)
+);
+router.get(
+  "/skipped-statement",
+  asyncHandler(exportController.exportSkippedStatement)
+);
 
 export default router;

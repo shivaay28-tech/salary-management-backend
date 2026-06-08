@@ -6,13 +6,17 @@ import {
   getActiveAdvancesForEmployee,
 } from "./advanceService";
 
+function carryForwardAddition(record: ISalaryRecord): number {
+  return record.deferredCarryForward ?? 0;
+}
+
 export function recalculateFinalSalaryKeepingAdvance(
   record: ISalaryRecord
 ): void {
   record.finalSalary = calculateFinalSalary({
     monthlySalary: record.baseSalary,
     bonus: record.bonus,
-    otherAddition: record.otherAddition,
+    otherAddition: record.otherAddition + carryForwardAddition(record),
     otherDeduction: record.otherDeduction,
     advanceDeduction: record.advanceDeduction,
   });
@@ -23,7 +27,11 @@ export async function refreshPendingSalaryFromEmployee(
   record: ISalaryRecord,
   monthlySalary: number
 ): Promise<ISalaryRecord> {
-  if (record.paidStatus === SalaryPaidStatus.PAID) {
+  if (
+    record.paidStatus === SalaryPaidStatus.PAID ||
+    record.paidStatus === SalaryPaidStatus.SKIPPED ||
+    record.paidStatus === SalaryPaidStatus.DEFERRED
+  ) {
     return record;
   }
 
@@ -54,7 +62,8 @@ export async function recalculateSalaryAdvances(
   const grossBeforeAdvance =
     record.baseSalary +
     record.bonus +
-    record.otherAddition -
+    record.otherAddition +
+    carryForwardAddition(record) -
     record.otherDeduction;
 
   const { totalDeduction } = computeAdvanceDeduction(
@@ -65,7 +74,7 @@ export async function recalculateSalaryAdvances(
   const finalSalary = calculateFinalSalary({
     monthlySalary: record.baseSalary,
     bonus: record.bonus,
-    otherAddition: record.otherAddition,
+    otherAddition: record.otherAddition + carryForwardAddition(record),
     otherDeduction: record.otherDeduction,
     advanceDeduction: totalDeduction,
   });
@@ -85,12 +94,13 @@ export async function recalculateSalaryAdvances(
 export async function recalculatePendingSalaries(
   filter: Record<string, unknown>
 ): Promise<void> {
+  const { applyDeferredCarryForward } = await import("./salaryDeferService");
   const pending = await SalaryRecord.find({
     ...filter,
     paidStatus: SalaryPaidStatus.PENDING,
   });
 
   for (const record of pending) {
-    await recalculateSalaryAdvances(record);
+    await applyDeferredCarryForward(record);
   }
 }
