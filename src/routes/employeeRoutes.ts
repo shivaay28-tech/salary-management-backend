@@ -4,13 +4,22 @@ import { authenticate } from "../middleware/auth";
 import { requirePermission } from "../middleware/rbac";
 import { Permission } from "../types/permissions";
 import { asyncHandler } from "../utils/asyncHandler";
-import { photoUpload } from "../services/uploadService";
+import { excelUpload, photoUpload } from "../services/uploadService";
 
 const router = Router();
 
 router.use(authenticate, requirePermission(Permission.EMPLOYEES));
 
 router.get("/", asyncHandler(employeeController.listEmployees));
+router.get(
+  "/import/template",
+  asyncHandler(employeeController.downloadImportTemplate)
+);
+router.post(
+  "/import",
+  excelUpload.single("file"),
+  asyncHandler(employeeController.importEmployees)
+);
 router.get("/:id", asyncHandler(employeeController.getEmployee));
 router.post("/", asyncHandler(employeeController.createEmployee));
 router.put("/:id", asyncHandler(employeeController.updateEmployee));

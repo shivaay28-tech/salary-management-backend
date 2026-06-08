@@ -21,12 +21,35 @@ if (cloudinaryConfigured) {
   });
 }
 
+const EXCEL_TYPES = [
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+];
+const EXCEL_MAX_SIZE = 10 * 1024 * 1024;
+
 export const photoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_SIZE },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_TYPES.includes(file.mimetype)) {
       cb(new Error("Only JPG, PNG, and WEBP images are allowed"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+export const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: EXCEL_MAX_SIZE },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (
+      !EXCEL_TYPES.includes(file.mimetype) &&
+      ext !== ".xlsx" &&
+      ext !== ".xls"
+    ) {
+      cb(new Error("Only Excel files (.xlsx) are allowed"));
       return;
     }
     cb(null, true);

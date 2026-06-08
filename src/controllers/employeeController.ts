@@ -7,6 +7,10 @@ import { assertOfficeAccess } from "../middleware/rbac";
 import { AppError } from "../middleware/errorHandler";
 import { logAudit } from "../services/auditService";
 import { saveEmployeePhoto } from "../services/uploadService";
+import {
+  importEmployeesFromExcel,
+  sendEmployeeImportTemplate,
+} from "../services/employeeImportService";
 import { getOfficeIdFilter } from "../utils/officeFilter";
 
 const bankSchema = z.object({
@@ -49,6 +53,12 @@ export async function listEmployees(req: AuthRequest, res: Response): Promise<vo
   }
   if (req.query.status) {
     filter.status = String(req.query.status);
+  }
+  if (req.query.name) {
+    const name = String(req.query.name).trim();
+    if (name) {
+      filter.fullName = { $regex: name, $options: "i" };
+    }
   }
 
   const employees = await Employee.find(filter)
@@ -136,6 +146,26 @@ export async function deleteEmployee(req: AuthRequest, res: Response): Promise<v
   }
 
   res.json({ success: true, message: "Employee deleted" });
+}
+
+export async function downloadImportTemplate(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  void req;
+  await sendEmployeeImportTemplate(res);
+}
+
+export async function importEmployees(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  if (!req.file) {
+    throw new AppError("Excel file required", 400);
+  }
+
+  const result = await importEmployeesFromExcel(req, req.file.buffer);
+  res.json({ success: true, data: result });
 }
 
 export async function uploadPhoto(req: AuthRequest, res: Response): Promise<void> {
