@@ -25,7 +25,7 @@ const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
   email: z.string().email().optional(),
   password: z.string().min(6).optional(),
-  assignedOfficeIds: z.array(z.string()).optional(),
+  assignedOfficeIds: z.array(z.string()).min(1).optional(),
   permissions: permissionSchema.min(1).optional(),
   isActive: z.boolean().optional(),
 });

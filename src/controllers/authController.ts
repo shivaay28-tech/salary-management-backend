@@ -17,18 +17,41 @@ const loginSchema = z.object({
   password: z.string().min(6),
 });
 
+function toOfficeIdStrings(
+  assignedOfficeIds: Array<
+    | string
+    | { _id?: { toString(): string }; toString(): string }
+  >
+): string[] {
+  return assignedOfficeIds.map((officeId) => {
+    if (typeof officeId === "string") return officeId;
+    if (
+      officeId &&
+      typeof officeId === "object" &&
+      "_id" in officeId &&
+      officeId._id
+    ) {
+      return officeId._id.toString();
+    }
+    return officeId.toString();
+  });
+}
+
 function buildTokenPayload(user: {
   _id: { toString(): string };
   email: string;
   role: TokenPayload["role"];
-  assignedOfficeIds: { toString(): string }[];
+  assignedOfficeIds: Array<
+    | string
+    | { _id?: { toString(): string }; toString(): string }
+  >;
   permissions?: TokenPayload["permissions"];
 }): TokenPayload {
   return {
     userId: user._id.toString(),
     email: user.email,
     role: user.role,
-    assignedOfficeIds: user.assignedOfficeIds.map((id) => id.toString()),
+    assignedOfficeIds: toOfficeIdStrings(user.assignedOfficeIds),
     permissions: resolvePermissions(user.permissions),
   };
 }
@@ -42,7 +65,10 @@ function serializeUser(user: {
   permissions?: TokenPayload["permissions"];
 }) {
   return {
-    id: user._id,
+    id:
+      typeof user._id === "object" && user._id !== null && "toString" in user._id
+        ? user._id.toString()
+        : String(user._id),
     name: user.name,
     email: user.email,
     role: user.role,
