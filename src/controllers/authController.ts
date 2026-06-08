@@ -15,6 +15,7 @@ import { resolvePermissions } from "../types/permissions";
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
+  
 });
 
 function buildTokenPayload(user: {
