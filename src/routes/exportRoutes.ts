@@ -7,21 +7,36 @@ import { asyncHandler } from "../utils/asyncHandler";
 
 const router = Router();
 
-router.use(authenticate, requirePermission(Permission.REPORTS));
+router.use(authenticate);
 
-router.get("/salary", asyncHandler(exportController.exportSalaryReport));
-router.get("/employees", asyncHandler(exportController.exportEmployeeList));
-router.get("/advances", asyncHandler(exportController.exportAdvanceReport));
+router.get(
+  "/salary",
+  requirePermission(Permission.SALARIES, Permission.REPORTS),
+  asyncHandler(exportController.exportSalaryReport)
+);
+router.get(
+  "/employees",
+  requirePermission(Permission.EMPLOYEES, Permission.REPORTS),
+  asyncHandler(exportController.exportEmployeeList)
+);
+router.get(
+  "/advances",
+  requirePermission(Permission.ADVANCES, Permission.REPORTS),
+  asyncHandler(exportController.exportAdvanceReport)
+);
 router.get(
   "/advance-statement",
+  requirePermission(Permission.ADVANCES, Permission.REPORTS),
   asyncHandler(exportController.exportAdvanceStatement)
 );
 router.get(
   "/deferred-statement",
+  requirePermission(Permission.SALARIES, Permission.REPORTS),
   asyncHandler(exportController.exportDeferredStatement)
 );
 router.get(
   "/skipped-statement",
+  requirePermission(Permission.SALARIES, Permission.REPORTS),
   asyncHandler(exportController.exportSkippedStatement)
 );
 

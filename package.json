@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "seed": "tsx src/scripts/seed.ts",
     "clear": "tsx src/scripts/clear.ts",
-    "reset": "tsx src/scripts/clear.ts && tsx src/scripts/seed.ts"
+    "reset": "tsx src/scripts/clear.ts && tsx src/scripts/seed.ts",
+    "test": "tsx --test src/utils/salary.test.ts"
   },
   "keywords": [],
   "author": "",

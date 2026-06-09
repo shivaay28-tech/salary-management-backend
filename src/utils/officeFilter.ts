@@ -21,5 +21,5 @@ export function getOfficeIdFilter(req: AuthRequest): Record<string, unknown> {
 
 export function getOfficeIdsForQuery(req: AuthRequest): string[] | null {
   if (!req.user || req.user.role === UserRole.SUPER_ADMIN) return null;
-  return req.user.assignedOfficeIds;
+  return (req.user.assignedOfficeIds ?? []).filter(Boolean);
 }

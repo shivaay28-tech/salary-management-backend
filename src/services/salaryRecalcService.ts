@@ -1,3 +1,4 @@
+import { IAdvance } from "../models/Advance";
 import { SalaryRecord, ISalaryRecord } from "../models/SalaryRecord";
 import { SalaryPaidStatus } from "../types/enums";
 import { calculateFinalSalary } from "../utils/salary";
@@ -8,6 +9,32 @@ import {
 
 function carryForwardAddition(record: ISalaryRecord): number {
   return record.deferredCarryForward ?? 0;
+}
+
+export function applyAdvanceDeductionToRecord(
+  record: ISalaryRecord,
+  advances: IAdvance[]
+): void {
+  const grossBeforeAdvance =
+    record.baseSalary +
+    record.bonus +
+    record.otherAddition +
+    carryForwardAddition(record) -
+    record.otherDeduction;
+
+  const { totalDeduction } = computeAdvanceDeduction(
+    advances,
+    Math.max(0, grossBeforeAdvance)
+  );
+
+  record.advanceDeduction = totalDeduction;
+  record.finalSalary = calculateFinalSalary({
+    monthlySalary: record.baseSalary,
+    bonus: record.bonus,
+    otherAddition: record.otherAddition + carryForwardAddition(record),
+    otherDeduction: record.otherDeduction,
+    advanceDeduction: totalDeduction,
+  });
 }
 
 export function recalculateFinalSalaryKeepingAdvance(

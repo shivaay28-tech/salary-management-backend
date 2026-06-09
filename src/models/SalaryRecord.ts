@@ -45,6 +45,9 @@ export interface ISalaryRecord extends Document {
   month: number;
   year: number;
   baseSalary: number;
+  fullMonthlySalary?: number;
+  payableDays?: number;
+  daysInMonth?: number;
   bonus: number;
   otherAddition: number;
   otherDeduction: number;
@@ -75,6 +78,9 @@ const salaryRecordSchema = new Schema<ISalaryRecord>(
     month: { type: Number, required: true, min: 1, max: 12 },
     year: { type: Number, required: true, min: 2000 },
     baseSalary: { type: Number, required: true, min: 0 },
+    fullMonthlySalary: { type: Number, min: 0 },
+    payableDays: { type: Number, min: 0 },
+    daysInMonth: { type: Number, min: 0 },
     bonus: { type: Number, default: 0, min: 0 },
     otherAddition: { type: Number, default: 0, min: 0 },
     otherDeduction: { type: Number, default: 0, min: 0 },

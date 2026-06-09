@@ -10,12 +10,12 @@ import { AppError } from "../middleware/errorHandler";
 import { logAudit } from "../services/auditService";
 import { generateMonthlySalaries } from "../services/salaryService";
 import { getOfficeIdFilter, getOfficeIdsForQuery } from "../utils/officeFilter";
-import { recalculatePendingSalaries } from "../services/salaryRecalcService";
 import {
   applyAdvanceDeductionToSalary,
   getSalaryAdvanceSummary,
   paySalaryRecord,
 } from "../services/salaryAdvanceService";
+import { JAMA_UI } from "../constants/jamaLabels";
 import {
   buildDeferredSalaryStatement,
   buildSkippedSalaryStatement,
@@ -110,15 +110,27 @@ export async function listSalaries(req: AuthRequest, res: Response): Promise<voi
   if (req.query.paidStatus) filter.paidStatus = String(req.query.paidStatus);
   if (req.query.employeeId) filter.employeeId = String(req.query.employeeId);
 
-  await recalculatePendingSalaries(filter);
-
   const salaries = await SalaryRecord.find(filter)
-    .populate("employeeId", "fullName monthlySalary")
+    .populate("employeeId", "fullName monthlySalary dateOfJoining outDate")
     .populate("officeId", "name")
     .sort({ year: -1, month: -1 });
 
   const employeeIds = [
-    ...new Set(salaries.map((s) => s.employeeId._id?.toString() ?? s.employeeId.toString())),
+    ...new Set(
+      salaries
+        .map((s) => {
+          const emp = s.employeeId as
+            | { _id?: { toString(): string } }
+            | mongoose.Types.ObjectId
+            | null;
+          if (!emp) return null;
+          if (typeof emp === "object" && "_id" in emp && emp._id) {
+            return emp._id.toString();
+          }
+          return emp.toString();
+        })
+        .filter((id): id is string => Boolean(id))
+    ),
   ];
 
   const outstandingRows =
@@ -147,11 +159,23 @@ export async function listSalaries(req: AuthRequest, res: Response): Promise<voi
   );
 
   const data = salaries.map((s) => {
-    const empId = s.employeeId._id?.toString() ?? s.employeeId.toString();
+    const emp = s.employeeId as
+      | { _id?: { toString(): string }; fullName?: string }
+      | mongoose.Types.ObjectId
+      | null;
+    let empId: string | null = null;
+    if (emp) {
+      if (typeof emp === "object" && "_id" in emp && emp._id) {
+        empId = emp._id.toString();
+      } else {
+        empId = emp.toString();
+      }
+    }
     const json = s.toObject();
     return {
       ...json,
-      outstandingAdvance: outstandingMap.get(empId) ?? 0,
+      employeeId: emp ?? json.employeeId,
+      outstandingAdvance: empId ? (outstandingMap.get(empId) ?? 0) : 0,
     };
   });
 
@@ -456,11 +480,11 @@ export async function deferSalary(req: AuthRequest, res: Response): Promise<void
       parsed.data.deferredUntilYear
     );
   } catch (err) {
-    throw new AppError(err instanceof Error ? err.message : "Defer failed", 400);
+    throw new AppError(err instanceof Error ? err.message : JAMA_UI.deferFailed, 400);
   }
 
   if (req.user) {
-    await logAudit(req.user, "Salary Deferred", "salaries", {
+    await logAudit(req.user, JAMA_UI.auditAction, "salaries", {
       salaryId: record._id,
       month: record.month,
       year: record.year,

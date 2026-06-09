@@ -11,12 +11,26 @@ import { getOfficeIdFilter } from "../utils/officeFilter";
 import { sendExcel, sendExcelMultiSheet, sendPdf } from "../services/exportService";
 import { getDeductionHistoryByEmployee } from "../services/advanceDeductionHistoryService";
 import { hasCustomDateFilter, resolveReportPeriod } from "../utils/dateRange";
+import { JAMA_UI, SALARY_STATUS_LABELS } from "../constants/jamaLabels";
 import { SalaryPaidStatus } from "../types/enums";
 import {
   buildDeferredSalaryStatement,
   buildSkippedSalaryStatement,
 } from "../services/salaryDeferService";
 import type { IEmployee } from "../models/Employee";
+
+type PopulatedEmployeeRef =
+  | { _id?: { toString(): string }; fullName?: string; mobileNumber?: string }
+  | mongoose.Types.ObjectId
+  | null;
+
+function salaryEmployeeId(employeeId: PopulatedEmployeeRef): string | null {
+  if (!employeeId) return null;
+  if (typeof employeeId === "object" && "_id" in employeeId && employeeId._id) {
+    return employeeId._id.toString();
+  }
+  return employeeId.toString();
+}
 
 function filterExportSalariesByDate<
   T extends { paidStatus: string; paidDate?: Date | null },
@@ -122,13 +136,19 @@ export async function exportSalaryReport(
   );
 
   records.sort((a, b) => {
-    const nameA = (a.employeeId as { fullName?: string } | null)?.fullName ?? "";
-    const nameB = (b.employeeId as { fullName?: string } | null)?.fullName ?? "";
+    const nameA =
+      (a.employeeId as { fullName?: string } | null)?.fullName ?? "";
+    const nameB =
+      (b.employeeId as { fullName?: string } | null)?.fullName ?? "";
     return nameA.localeCompare(nameB);
   });
 
   const employeeIds = [
-    ...new Set(records.map((s) => s.employeeId._id?.toString() ?? s.employeeId.toString())),
+    ...new Set(
+      records
+        .map((s) => salaryEmployeeId(s.employeeId as PopulatedEmployeeRef))
+        .filter((id): id is string => Boolean(id))
+    ),
   ];
 
   const outstandingRows =
@@ -231,6 +251,9 @@ export async function exportSalaryReport(
     "Month",
     "Year",
     "Base Salary",
+    "Full Monthly Salary",
+    "Payable Days",
+    "Days In Month",
     "Bonus",
     "Other Addition",
     "Other Deduction",
@@ -285,7 +308,7 @@ export async function exportSalaryReport(
 
   const toAllRow = (r: SalaryRecordRow) => {
     const e = empInfo(r);
-    const empId = r.employeeId._id?.toString() ?? r.employeeId.toString();
+    const empId = salaryEmployeeId(r.employeeId as PopulatedEmployeeRef);
     return [
       e.name,
       e.mobile,
@@ -293,13 +316,16 @@ export async function exportSalaryReport(
       e.month,
       e.year,
       r.baseSalary,
+      r.fullMonthlySalary ?? r.baseSalary,
+      r.payableDays ?? "",
+      r.daysInMonth ?? "",
       r.bonus,
       r.otherAddition,
       r.otherDeduction,
-      outstandingMap.get(empId) ?? 0,
+      empId ? (outstandingMap.get(empId) ?? 0) : 0,
       r.advanceDeduction,
       r.finalSalary,
-      r.paidStatus,
+      SALARY_STATUS_LABELS[r.paidStatus as SalaryPaidStatus] ?? r.paidStatus,
       paymentModeLabel(r.paymentMode),
       e.paidDate,
       r.remarks ?? "",
@@ -791,27 +817,27 @@ export async function exportDeferredStatement(
   }
 
   if (parsed.data.format === "excel") {
-    await sendExcelMultiSheet(res, "deferred-salary-statement.xlsx", [
+    await sendExcelMultiSheet(res, `${JAMA_UI.exportFilename}.xlsx`, [
       {
         name: "Summary",
         headers: [
           "Employee",
           "Mobile",
           "Office",
-          "Outstanding Deferred",
+          JAMA_UI.outstanding,
           "Settled (History)",
           "Pending Pay Period",
-          "Deferred In Pending",
+          JAMA_UI.inPending,
           "Pending Net Salary",
         ],
         rows: summaryRows,
       },
       {
-        name: "Deferred Lines",
+        name: JAMA_UI.linesSheet,
         headers: [
           "Employee",
           "Office",
-          "Deferred Period",
+          JAMA_UI.period,
           "Amount",
           "Status",
           "Carried To",
@@ -825,8 +851,8 @@ export async function exportDeferredStatement(
   } else {
     sendPdf(
       res,
-      "deferred-salary-statement.pdf",
-      "Deferred Salary Statement",
+      `${JAMA_UI.exportFilename}.pdf`,
+      JAMA_UI.statementTitle,
       [
         "Employee",
         "Office",

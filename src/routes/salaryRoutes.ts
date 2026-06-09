@@ -7,11 +7,22 @@ import { asyncHandler } from "../utils/asyncHandler";
 
 const router = Router();
 
-router.use(authenticate, requirePermission(Permission.SALARIES));
+router.use(authenticate);
+
+router.get(
+  "/deferred-statement",
+  requirePermission(Permission.SALARIES, Permission.REPORTS),
+  asyncHandler(salaryController.getDeferredStatement)
+);
+router.get(
+  "/skipped-statement",
+  requirePermission(Permission.SALARIES, Permission.REPORTS),
+  asyncHandler(salaryController.getSkippedStatement)
+);
+
+router.use(requirePermission(Permission.SALARIES));
 
 router.get("/", asyncHandler(salaryController.listSalaries));
-router.get("/deferred-statement", asyncHandler(salaryController.getDeferredStatement));
-router.get("/skipped-statement", asyncHandler(salaryController.getSkippedStatement));
 router.post("/generate", asyncHandler(salaryController.generateSalaries));
 router.post("/pay-all", asyncHandler(salaryController.markAllSalariesPaid));
 router.get("/:id/advance-info", asyncHandler(salaryController.getSalaryAdvanceInfo));

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { JAMA_UI } from "../constants/jamaLabels";
 import { SalaryRecord, ISalaryRecord } from "../models/SalaryRecord";
 import { SalaryPaidStatus } from "../types/enums";
 import { calculateFinalSalary } from "../utils/salary";
@@ -86,7 +87,7 @@ export async function deferSalaryRecord(
   deferredUntilYear?: number
 ): Promise<ISalaryRecord> {
   if (record.paidStatus !== SalaryPaidStatus.PENDING) {
-    throw new Error("Only pending salaries can be deferred");
+    throw new Error(JAMA_UI.onlyPending);
   }
 
   record.paidStatus = SalaryPaidStatus.DEFERRED;
@@ -234,7 +235,7 @@ export interface DeferredStatementResult {
 
 function buildScopeLabel(options: DeferredStatementOptions, status: string): string {
   if (status === "active") {
-    return "All outstanding deferred";
+    return JAMA_UI.allOutstanding;
   }
   if (options.month && options.year) {
     return salaryPeriodLabel(options.month, options.year);
