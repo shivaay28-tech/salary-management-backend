@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDashboard = getDashboard;
+const mongoose_1 = __importDefault(require("mongoose"));
 const Office_1 = require("../models/Office");
 const Employee_1 = require("../models/Employee");
 const Advance_1 = require("../models/Advance");
@@ -49,10 +53,14 @@ async function getDashboard(req, res) {
     const trendMonths = getLastNMonths(month, year, 6);
     const trendMatchers = trendMonths.map((p) => ({ month: p.month, year: p.year }));
     const salaryMonthFilter = { month, year, ...officeFilter };
-    const [totalOffices, totalEmployees, activeEmployees, outstandingAdvances, monthlySalaries, paidThisMonth, pendingThisMonth, recentSalaries, recentAdvances, recentEmployees, salaryTrendRaw, officeWiseSalary, advanceTrendRaw, advancesInMonth,] = await Promise.all([
+    const [totalOffices, totalEmployees, activeEmployees, outstandingAdvances, monthlySalaries, paidThisMonth, pendingThisMonth, deferredThisMonth, skippedThisMonth, recentSalaries, recentAdvances, recentEmployees, salaryTrendRaw, officeWiseSalary, advanceTrendRaw, advancesInMonth,] = await Promise.all([
         Office_1.Office.countDocuments(req.user?.role === "super_admin"
             ? {}
-            : { _id: { $in: req.user?.assignedOfficeIds ?? [] } }),
+            : {
+                _id: {
+                    $in: (req.user?.assignedOfficeIds ?? []).map((id) => new mongoose_1.default.Types.ObjectId(id)),
+                },
+            }),
         Employee_1.Employee.countDocuments(officeFilter),
         Employee_1.Employee.countDocuments({ ...officeFilter, status: enums_1.EmployeeStatus.ACTIVE }),
         Advance_1.Advance.aggregate([
@@ -79,7 +87,25 @@ async function getDashboard(req, res) {
                     paidStatus: enums_1.SalaryPaidStatus.PENDING,
                 },
             },
-            { $group: { _id: null, total: { $sum: "$finalSalary" } } },
+            { $group: { _id: null, total: { $sum: "$finalSalary" }, count: { $sum: 1 } } },
+        ]),
+        SalaryRecord_1.SalaryRecord.aggregate([
+            {
+                $match: {
+                    ...salaryMonthFilter,
+                    paidStatus: enums_1.SalaryPaidStatus.DEFERRED,
+                },
+            },
+            { $group: { _id: null, total: { $sum: "$finalSalary" }, count: { $sum: 1 } } },
+        ]),
+        SalaryRecord_1.SalaryRecord.aggregate([
+            {
+                $match: {
+                    ...salaryMonthFilter,
+                    paidStatus: enums_1.SalaryPaidStatus.SKIPPED,
+                },
+            },
+            { $group: { _id: null, count: { $sum: 1 } } },
         ]),
         SalaryRecord_1.SalaryRecord.find(salaryMonthFilter)
             .populate("employeeId", "fullName")
@@ -118,6 +144,20 @@ async function getDashboard(req, res) {
                             ],
                         },
                     },
+                    deferred: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$paidStatus", enums_1.SalaryPaidStatus.DEFERRED] },
+                                "$finalSalary",
+                                0,
+                            ],
+                        },
+                    },
+                    skipped: {
+                        $sum: {
+                            $cond: [{ $eq: ["$paidStatus", enums_1.SalaryPaidStatus.SKIPPED] }, 1, 0],
+                        },
+                    },
                 },
             },
         ]),
@@ -140,6 +180,15 @@ async function getDashboard(req, res) {
                         $sum: {
                             $cond: [
                                 { $eq: ["$paidStatus", enums_1.SalaryPaidStatus.PENDING] },
+                                "$finalSalary",
+                                0,
+                            ],
+                        },
+                    },
+                    deferred: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ["$paidStatus", enums_1.SalaryPaidStatus.DEFERRED] },
                                 "$finalSalary",
                                 0,
                             ],
@@ -182,7 +231,13 @@ async function getDashboard(req, res) {
     const officeMap = new Map(offices.map((o) => [o._id.toString(), o.name]));
     const trendMap = new Map(salaryTrendRaw.map((s) => [
         `${s._id.month}-${s._id.year}`,
-        { total: s.total, paid: s.paid, pending: s.pending },
+        {
+            total: s.total,
+            paid: s.paid,
+            pending: s.pending,
+            deferred: s.deferred ?? 0,
+            skipped: s.skipped ?? 0,
+        },
     ]));
     const salaryTrend = trendMonths.map((p) => {
         const key = `${p.month}-${p.year}`;
@@ -192,6 +247,8 @@ async function getDashboard(req, res) {
             total: row?.total ?? 0,
             paid: row?.paid ?? 0,
             pending: row?.pending ?? 0,
+            deferred: row?.deferred ?? 0,
+            skipped: row?.skipped ?? 0,
         };
     });
     const advanceTrend = advanceTrendRaw
@@ -202,6 +259,9 @@ async function getDashboard(req, res) {
     }));
     const paidAmount = paidThisMonth[0]?.total ?? 0;
     const pendingAmount = pendingThisMonth[0]?.total ?? 0;
+    const deferredAmount = deferredThisMonth[0]?.total ?? 0;
+    const deferredCount = deferredThisMonth[0]?.count ?? 0;
+    const skippedCount = skippedThisMonth[0]?.count ?? 0;
     res.json({
         success: true,
         data: {
@@ -218,6 +278,9 @@ async function getDashboard(req, res) {
                 totalOutstandingAdvances: outstandingAdvances[0]?.total ?? 0,
                 paidSalaryThisMonth: paidAmount,
                 pendingSalaryThisMonth: pendingAmount,
+                deferredSalaryThisMonth: deferredAmount,
+                deferredCountThisMonth: deferredCount,
+                skippedCountThisMonth: skippedCount,
                 advancesThisMonth: advancesInMonth[0]?.total ?? 0,
             },
             charts: {
@@ -227,11 +290,14 @@ async function getDashboard(req, res) {
                     total: o.total,
                     paid: o.paid,
                     pending: o.pending,
+                    deferred: o.deferred ?? 0,
                 })),
                 advanceTrend,
                 salaryStatus: {
                     paid: paidAmount,
                     pending: pendingAmount,
+                    deferred: deferredAmount,
+                    skipped: skippedCount,
                 },
             },
             recent: {

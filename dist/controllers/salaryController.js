@@ -42,6 +42,10 @@ exports.generateSalaries = generateSalaries;
 exports.updateSalary = updateSalary;
 exports.markSalaryPaid = markSalaryPaid;
 exports.markAllSalariesPaid = markAllSalariesPaid;
+exports.getDeferredStatement = getDeferredStatement;
+exports.getSkippedStatement = getSkippedStatement;
+exports.deferSalary = deferSalary;
+exports.skipSalary = skipSalary;
 exports.getSalary = getSalary;
 const mongoose_1 = __importDefault(require("mongoose"));
 const zod_1 = require("zod");
@@ -53,8 +57,9 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const auditService_1 = require("../services/auditService");
 const salaryService_1 = require("../services/salaryService");
 const officeFilter_1 = require("../utils/officeFilter");
-const salaryRecalcService_1 = require("../services/salaryRecalcService");
 const salaryAdvanceService_1 = require("../services/salaryAdvanceService");
+const jamaLabels_1 = require("../constants/jamaLabels");
+const salaryDeferService_1 = require("../services/salaryDeferService");
 const updateSalarySchema = zod_1.z.object({
     bonus: zod_1.z.coerce.number().min(0).optional(),
     otherAddition: zod_1.z.coerce.number().min(0).optional(),
@@ -70,9 +75,11 @@ const payBankSchema = zod_1.z.object({
     branch: zod_1.z.string().min(1),
 });
 const payAngadiyaSchema = zod_1.z.object({
-    angadiyaName: zod_1.z.string().min(1),
-    contactNumber: zod_1.z.string().min(1),
-    notes: zod_1.z.string().optional(),
+    name: zod_1.z.string().min(1),
+    number: zod_1.z.string().min(10),
+    angadiyaNumber: zod_1.z.string().min(1),
+    amount: zod_1.z.coerce.number().min(0),
+    city: zod_1.z.string().min(1),
 });
 const paySalarySchema = zod_1.z
     .object({
@@ -105,6 +112,14 @@ const generateSchema = zod_1.z.object({
     otherAddition: zod_1.z.coerce.number().min(0).optional(),
     otherDeduction: zod_1.z.coerce.number().min(0).optional(),
 });
+const deferSalarySchema = zod_1.z.object({
+    remarks: zod_1.z.string().optional(),
+    deferredUntilMonth: zod_1.z.coerce.number().min(1).max(12).optional(),
+    deferredUntilYear: zod_1.z.coerce.number().min(2000).optional(),
+});
+const skipSalarySchema = zod_1.z.object({
+    remarks: zod_1.z.string().min(1, "Reason is required"),
+});
 const payAllSchema = zod_1.z.object({
     month: zod_1.z.coerce.number().min(1).max(12),
     year: zod_1.z.coerce.number().min(2000),
@@ -126,13 +141,22 @@ async function listSalaries(req, res) {
         filter.paidStatus = String(req.query.paidStatus);
     if (req.query.employeeId)
         filter.employeeId = String(req.query.employeeId);
-    await (0, salaryRecalcService_1.recalculatePendingSalaries)(filter);
     const salaries = await SalaryRecord_1.SalaryRecord.find(filter)
-        .populate("employeeId", "fullName monthlySalary")
+        .populate("employeeId", "fullName monthlySalary dateOfJoining outDate")
         .populate("officeId", "name")
         .sort({ year: -1, month: -1 });
     const employeeIds = [
-        ...new Set(salaries.map((s) => s.employeeId._id?.toString() ?? s.employeeId.toString())),
+        ...new Set(salaries
+            .map((s) => {
+            const emp = s.employeeId;
+            if (!emp)
+                return null;
+            if (typeof emp === "object" && "_id" in emp && emp._id) {
+                return emp._id.toString();
+            }
+            return emp.toString();
+        })
+            .filter((id) => Boolean(id))),
     ];
     const outstandingRows = employeeIds.length > 0
         ? await Advance_1.Advance.aggregate([
@@ -155,11 +179,21 @@ async function listSalaries(req, res) {
         : [];
     const outstandingMap = new Map(outstandingRows.map((row) => [row._id.toString(), row.outstandingAdvance]));
     const data = salaries.map((s) => {
-        const empId = s.employeeId._id?.toString() ?? s.employeeId.toString();
+        const emp = s.employeeId;
+        let empId = null;
+        if (emp) {
+            if (typeof emp === "object" && "_id" in emp && emp._id) {
+                empId = emp._id.toString();
+            }
+            else {
+                empId = emp.toString();
+            }
+        }
         const json = s.toObject();
         return {
             ...json,
-            outstandingAdvance: outstandingMap.get(empId) ?? 0,
+            employeeId: emp ?? json.employeeId,
+            outstandingAdvance: empId ? (outstandingMap.get(empId) ?? 0) : 0,
         };
     });
     res.json({ success: true, data });
@@ -219,8 +253,10 @@ async function updateSalary(req, res) {
         throw new errorHandler_1.AppError("Salary record not found", 404);
     }
     (0, rbac_1.assertOfficeAccess)(req, record.officeId.toString());
-    if (record.paidStatus === enums_1.SalaryPaidStatus.PAID) {
-        throw new errorHandler_1.AppError("Cannot edit a paid salary record", 400);
+    if (record.paidStatus === enums_1.SalaryPaidStatus.PAID ||
+        record.paidStatus === enums_1.SalaryPaidStatus.DEFERRED ||
+        record.paidStatus === enums_1.SalaryPaidStatus.SKIPPED) {
+        throw new errorHandler_1.AppError("Cannot edit this salary record", 400);
     }
     if (parsed.data.bonus !== undefined)
         record.bonus = parsed.data.bonus;
@@ -349,6 +385,92 @@ async function markAllSalariesPaid(req, res) {
             total: pending.length,
         },
     });
+}
+async function getDeferredStatement(req, res) {
+    if (req.query.officeId) {
+        (0, rbac_1.assertOfficeAccess)(req, String(req.query.officeId));
+    }
+    const status = req.query.status === "settled" || req.query.status === "all"
+        ? req.query.status
+        : "active";
+    const data = await (0, salaryDeferService_1.buildDeferredSalaryStatement)((0, officeFilter_1.getOfficeIdFilter)(req), {
+        officeId: req.query.officeId ? String(req.query.officeId) : undefined,
+        employeeId: req.query.employeeId ? String(req.query.employeeId) : undefined,
+        status,
+        month: req.query.month ? Number(req.query.month) : undefined,
+        year: req.query.year ? Number(req.query.year) : undefined,
+    });
+    res.json({ success: true, data });
+}
+async function getSkippedStatement(req, res) {
+    if (req.query.officeId) {
+        (0, rbac_1.assertOfficeAccess)(req, String(req.query.officeId));
+    }
+    const data = await (0, salaryDeferService_1.buildSkippedSalaryStatement)((0, officeFilter_1.getOfficeIdFilter)(req), {
+        officeId: req.query.officeId ? String(req.query.officeId) : undefined,
+        employeeId: req.query.employeeId ? String(req.query.employeeId) : undefined,
+        year: req.query.year ? Number(req.query.year) : undefined,
+        month: req.query.month ? Number(req.query.month) : undefined,
+    });
+    res.json({ success: true, data });
+}
+async function deferSalary(req, res) {
+    const parsed = deferSalarySchema.safeParse(req.body);
+    if (!parsed.success) {
+        throw new errorHandler_1.AppError("Invalid input");
+    }
+    const record = await SalaryRecord_1.SalaryRecord.findById(String(req.params.id));
+    if (!record) {
+        throw new errorHandler_1.AppError("Salary record not found", 404);
+    }
+    (0, rbac_1.assertOfficeAccess)(req, record.officeId.toString());
+    try {
+        await (0, salaryDeferService_1.deferSalaryRecord)(record, parsed.data.remarks, parsed.data.deferredUntilMonth, parsed.data.deferredUntilYear);
+    }
+    catch (err) {
+        throw new errorHandler_1.AppError(err instanceof Error ? err.message : jamaLabels_1.JAMA_UI.deferFailed, 400);
+    }
+    if (req.user) {
+        await (0, auditService_1.logAudit)(req.user, jamaLabels_1.JAMA_UI.auditAction, "salaries", {
+            salaryId: record._id,
+            month: record.month,
+            year: record.year,
+            amount: record.finalSalary,
+        });
+    }
+    const result = await SalaryRecord_1.SalaryRecord.findById(record._id)
+        .populate("employeeId", "fullName")
+        .populate("officeId", "name");
+    res.json({ success: true, data: result });
+}
+async function skipSalary(req, res) {
+    const parsed = skipSalarySchema.safeParse(req.body);
+    if (!parsed.success) {
+        throw new errorHandler_1.AppError(parsed.error.issues[0]?.message ?? "Invalid input");
+    }
+    const record = await SalaryRecord_1.SalaryRecord.findById(String(req.params.id));
+    if (!record) {
+        throw new errorHandler_1.AppError("Salary record not found", 404);
+    }
+    (0, rbac_1.assertOfficeAccess)(req, record.officeId.toString());
+    try {
+        await (0, salaryDeferService_1.skipSalaryRecord)(record, parsed.data.remarks);
+    }
+    catch (err) {
+        throw new errorHandler_1.AppError(err instanceof Error ? err.message : "Skip failed", 400);
+    }
+    if (req.user) {
+        await (0, auditService_1.logAudit)(req.user, "Salary Skipped (Waived)", "salaries", {
+            salaryId: record._id,
+            month: record.month,
+            year: record.year,
+            remarks: parsed.data.remarks,
+        });
+    }
+    const result = await SalaryRecord_1.SalaryRecord.findById(record._id)
+        .populate("employeeId", "fullName")
+        .populate("officeId", "name");
+    res.json({ success: true, data: result });
 }
 async function getSalary(req, res) {
     const record = await SalaryRecord_1.SalaryRecord.findById(String(req.params.id))

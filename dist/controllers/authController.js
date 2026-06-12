@@ -10,16 +10,43 @@ const User_1 = require("../models/User");
 const password_1 = require("../utils/password");
 const jwt_1 = require("../utils/jwt");
 const errorHandler_1 = require("../middleware/errorHandler");
+const permissions_1 = require("../types/permissions");
 const loginSchema = zod_1.z.object({
     email: zod_1.z.string().email(),
     password: zod_1.z.string().min(6),
 });
+function toOfficeIdStrings(assignedOfficeIds) {
+    return assignedOfficeIds.map((officeId) => {
+        if (typeof officeId === "string")
+            return officeId;
+        if (officeId &&
+            typeof officeId === "object" &&
+            "_id" in officeId &&
+            officeId._id) {
+            return officeId._id.toString();
+        }
+        return officeId.toString();
+    });
+}
 function buildTokenPayload(user) {
     return {
         userId: user._id.toString(),
         email: user.email,
         role: user.role,
-        assignedOfficeIds: user.assignedOfficeIds.map((id) => id.toString()),
+        assignedOfficeIds: toOfficeIdStrings(user.assignedOfficeIds),
+        permissions: (0, permissions_1.resolvePermissions)(user.permissions),
+    };
+}
+function serializeUser(user) {
+    return {
+        id: typeof user._id === "object" && user._id !== null && "toString" in user._id
+            ? user._id.toString()
+            : String(user._id),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        assignedOfficeIds: user.assignedOfficeIds,
+        permissions: (0, permissions_1.resolvePermissions)(user.permissions),
     };
 }
 async function login(req, res) {
@@ -45,13 +72,7 @@ async function login(req, res) {
     res.json({
         success: true,
         data: {
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                assignedOfficeIds: user.assignedOfficeIds,
-            },
+            user: serializeUser(user),
             accessToken,
             refreshToken,
         },
@@ -91,17 +112,15 @@ async function logout(req, res) {
 }
 async function me(req, res) {
     const user = await User_1.User.findById(req.user?.userId).populate("assignedOfficeIds", "name status");
-    if (!user) {
+    if (!user || !user.isActive) {
         throw new errorHandler_1.AppError("User not found", 404);
     }
+    const accessToken = (0, jwt_1.signAccessToken)(buildTokenPayload(user));
     res.json({
         success: true,
         data: {
-            id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            assignedOfficeIds: user.assignedOfficeIds,
+            user: serializeUser(user),
+            accessToken,
         },
     });
 }

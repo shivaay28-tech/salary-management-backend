@@ -5,6 +5,8 @@ exports.getEmployee = getEmployee;
 exports.createEmployee = createEmployee;
 exports.updateEmployee = updateEmployee;
 exports.deleteEmployee = deleteEmployee;
+exports.downloadImportTemplate = downloadImportTemplate;
+exports.importEmployees = importEmployees;
 exports.uploadPhoto = uploadPhoto;
 const zod_1 = require("zod");
 const Employee_1 = require("../models/Employee");
@@ -13,6 +15,7 @@ const rbac_1 = require("../middleware/rbac");
 const errorHandler_1 = require("../middleware/errorHandler");
 const auditService_1 = require("../services/auditService");
 const uploadService_1 = require("../services/uploadService");
+const employeeImportService_1 = require("../services/employeeImportService");
 const officeFilter_1 = require("../utils/officeFilter");
 const bankSchema = zod_1.z.object({
     bankName: zod_1.z.string().min(1),
@@ -22,9 +25,11 @@ const bankSchema = zod_1.z.object({
     branch: zod_1.z.string().min(1),
 });
 const angadiyaSchema = zod_1.z.object({
-    angadiyaName: zod_1.z.string().min(1),
-    contactNumber: zod_1.z.string().min(1),
-    notes: zod_1.z.string().optional(),
+    name: zod_1.z.string().min(1),
+    number: zod_1.z.string().min(10),
+    angadiyaNumber: zod_1.z.string().min(1),
+    amount: zod_1.z.coerce.number().min(0),
+    city: zod_1.z.string().min(1),
 });
 const employeeBaseSchema = zod_1.z.object({
     fullName: zod_1.z.string().min(2),
@@ -48,6 +53,12 @@ async function listEmployees(req, res) {
     }
     if (req.query.status) {
         filter.status = String(req.query.status);
+    }
+    if (req.query.name) {
+        const name = String(req.query.name).trim();
+        if (name) {
+            filter.fullName = { $regex: name, $options: "i" };
+        }
     }
     const employees = await Employee_1.Employee.find(filter)
         .populate("officeId", "name")
@@ -116,6 +127,17 @@ async function deleteEmployee(req, res) {
         });
     }
     res.json({ success: true, message: "Employee deleted" });
+}
+async function downloadImportTemplate(req, res) {
+    void req;
+    await (0, employeeImportService_1.sendEmployeeImportTemplate)(res);
+}
+async function importEmployees(req, res) {
+    if (!req.file) {
+        throw new errorHandler_1.AppError("Excel file required", 400);
+    }
+    const result = await (0, employeeImportService_1.importEmployeesFromExcel)(req, req.file.buffer);
+    res.json({ success: true, data: result });
 }
 async function uploadPhoto(req, res) {
     const employee = await Employee_1.Employee.findById(String(req.params.id));

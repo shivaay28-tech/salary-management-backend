@@ -20,6 +20,8 @@ var SalaryPaidStatus;
 (function (SalaryPaidStatus) {
     SalaryPaidStatus["PENDING"] = "pending";
     SalaryPaidStatus["PAID"] = "paid";
+    SalaryPaidStatus["DEFERRED"] = "deferred";
+    SalaryPaidStatus["SKIPPED"] = "skipped";
 })(SalaryPaidStatus || (exports.SalaryPaidStatus = SalaryPaidStatus = {}));
 var AdvanceRecoveryMode;
 (function (AdvanceRecoveryMode) {

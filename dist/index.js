@@ -22,6 +22,12 @@ const reportRoutes_1 = __importDefault(require("./routes/reportRoutes"));
 const auditRoutes_1 = __importDefault(require("./routes/auditRoutes"));
 const exportRoutes_1 = __importDefault(require("./routes/exportRoutes"));
 const app = (0, express_1.default)();
+// Required when deployed behind nginx / cloud load balancers (X-Forwarded-For).
+const trustProxy = process.env.TRUST_PROXY === "true" ||
+    (process.env.NODE_ENV === "production" && process.env.TRUST_PROXY !== "false");
+if (trustProxy) {
+    app.set("trust proxy", 1);
+}
 app.use((0, cors_1.default)({
     origin: env_1.env.clientUrl,
     credentials: true,

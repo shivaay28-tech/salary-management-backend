@@ -2,10 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listAdvances = listAdvances;
 exports.createAdvance = createAdvance;
+exports.updateAdvance = updateAdvance;
+exports.deleteAdvance = deleteAdvance;
 exports.getAdvanceStatement = getAdvanceStatement;
 exports.getAdvance = getAdvance;
 const zod_1 = require("zod");
 const Advance_1 = require("../models/Advance");
+const AdvanceDeductionLog_1 = require("../models/AdvanceDeductionLog");
 const Employee_1 = require("../models/Employee");
 const enums_1 = require("../types/enums");
 const rbac_1 = require("../middleware/rbac");
@@ -13,6 +16,7 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const auditService_1 = require("../services/auditService");
 const officeFilter_1 = require("../utils/officeFilter");
 const advanceDeductionHistoryService_1 = require("../services/advanceDeductionHistoryService");
+const dateRange_1 = require("../utils/dateRange");
 const advanceSchema = zod_1.z
     .object({
     employeeId: zod_1.z.string(),
@@ -86,6 +90,86 @@ async function createAdvance(req, res) {
         .populate("officeId", "name");
     res.status(201).json({ success: true, data: result });
 }
+const advanceUpdateSchema = zod_1.z
+    .object({
+    advanceAmount: zod_1.z.coerce.number().positive().optional(),
+    date: zod_1.z.coerce.date().optional(),
+    reason: zod_1.z.string().min(1).optional(),
+    notes: zod_1.z.string().optional(),
+    recoveryMode: zod_1.z.nativeEnum(enums_1.AdvanceRecoveryMode).optional(),
+    installmentAmount: zod_1.z.coerce.number().positive().optional(),
+})
+    .refine((data) => data.recoveryMode !== enums_1.AdvanceRecoveryMode.INSTALLMENT ||
+    data.installmentAmount === undefined ||
+    data.installmentAmount > 0, { message: "Installment amount required for installment recovery" });
+async function updateAdvance(req, res) {
+    const parsed = advanceUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+        throw new errorHandler_1.AppError(parsed.error.issues[0]?.message ?? "Invalid input");
+    }
+    const advance = await Advance_1.Advance.findById(String(req.params.id));
+    if (!advance) {
+        throw new errorHandler_1.AppError("Advance not found", 404);
+    }
+    (0, rbac_1.assertOfficeAccess)(req, advance.officeId.toString());
+    const nextRecoveryMode = parsed.data.recoveryMode ?? advance.recoveryMode;
+    if (parsed.data.advanceAmount !== undefined &&
+        parsed.data.advanceAmount !== advance.advanceAmount) {
+        if (parsed.data.advanceAmount < advance.amountRecovered) {
+            throw new errorHandler_1.AppError(`Amount cannot be less than already recovered (₹${advance.amountRecovered})`, 400);
+        }
+        advance.advanceAmount = parsed.data.advanceAmount;
+        advance.outstandingAmount = parsed.data.advanceAmount - advance.amountRecovered;
+        advance.isFullyRecovered = advance.outstandingAmount <= 0;
+    }
+    if (parsed.data.date !== undefined)
+        advance.date = parsed.data.date;
+    if (parsed.data.reason !== undefined)
+        advance.reason = parsed.data.reason;
+    if (parsed.data.notes !== undefined)
+        advance.notes = parsed.data.notes;
+    if (parsed.data.recoveryMode !== undefined)
+        advance.recoveryMode = parsed.data.recoveryMode;
+    if (nextRecoveryMode === enums_1.AdvanceRecoveryMode.INSTALLMENT) {
+        const installment = parsed.data.installmentAmount ?? advance.installmentAmount;
+        if (!installment || installment <= 0) {
+            throw new errorHandler_1.AppError("Installment amount required for installment recovery");
+        }
+        advance.installmentAmount = installment;
+    }
+    else {
+        advance.installmentAmount = undefined;
+    }
+    await advance.save();
+    if (req.user) {
+        await (0, auditService_1.logAudit)(req.user, "Advance Updated", "advances", {
+            advanceId: advance._id,
+        });
+    }
+    const result = await Advance_1.Advance.findById(advance._id)
+        .populate("employeeId", "fullName")
+        .populate("officeId", "name");
+    res.json({ success: true, data: result });
+}
+async function deleteAdvance(req, res) {
+    const advance = await Advance_1.Advance.findById(String(req.params.id));
+    if (!advance) {
+        throw new errorHandler_1.AppError("Advance not found", 404);
+    }
+    (0, rbac_1.assertOfficeAccess)(req, advance.officeId.toString());
+    if (advance.amountRecovered > 0) {
+        throw new errorHandler_1.AppError("Cannot delete advance that has salary deductions. Recoveries are already recorded.", 400);
+    }
+    await AdvanceDeductionLog_1.AdvanceDeductionLog.deleteMany({ advanceId: advance._id });
+    await advance.deleteOne();
+    if (req.user) {
+        await (0, auditService_1.logAudit)(req.user, "Advance Deleted", "advances", {
+            advanceId: advance._id,
+            amount: advance.advanceAmount,
+        });
+    }
+    res.json({ success: true, message: "Advance deleted" });
+}
 async function getAdvanceStatement(req, res) {
     const filter = { ...(0, officeFilter_1.getOfficeIdFilter)(req) };
     if (req.query.officeId) {
@@ -101,6 +185,16 @@ async function getAdvanceStatement(req, res) {
     }
     else if (req.query.status === "recovered") {
         filter.isFullyRecovered = true;
+    }
+    if (req.query.month && req.query.year) {
+        const month = Number(req.query.month);
+        const year = Number(req.query.year);
+        if (month >= 1 && month <= 12 && year >= 2000) {
+            const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+            const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
+            const { start, end } = (0, dateRange_1.resolveReportPeriod)({ month, year, dateFrom, dateTo });
+            filter.date = { $gte: start, $lte: end };
+        }
     }
     const advances = await Advance_1.Advance.find(filter)
         .populate("employeeId", "fullName mobileNumber")

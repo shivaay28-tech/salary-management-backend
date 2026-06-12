@@ -51,6 +51,7 @@ async function createOffice(req, res) {
 }
 async function updateOffice(req, res) {
     const id = String(req.params.id);
+    (0, rbac_1.assertOfficeAccess)(req, id);
     const parsed = officeSchema.partial().safeParse(req.body);
     if (!parsed.success) {
         throw new errorHandler_1.AppError("Invalid input");
@@ -69,6 +70,7 @@ async function updateOffice(req, res) {
 }
 async function deleteOffice(req, res) {
     const id = String(req.params.id);
+    (0, rbac_1.assertOfficeAccess)(req, id);
     const office = await Office_1.Office.findByIdAndDelete(id);
     if (!office) {
         throw new errorHandler_1.AppError("Office not found", 404);

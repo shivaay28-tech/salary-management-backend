@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.photoUpload = void 0;
+exports.excelUpload = exports.photoUpload = void 0;
 exports.saveEmployeePhoto = saveEmployeePhoto;
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -23,12 +23,31 @@ if (cloudinaryConfigured) {
         api_secret: env_1.env.cloudinary.apiSecret,
     });
 }
+const EXCEL_TYPES = [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+];
+const EXCEL_MAX_SIZE = 10 * 1024 * 1024;
 exports.photoUpload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: MAX_SIZE },
     fileFilter: (_req, file, cb) => {
         if (!ALLOWED_TYPES.includes(file.mimetype)) {
             cb(new Error("Only JPG, PNG, and WEBP images are allowed"));
+            return;
+        }
+        cb(null, true);
+    },
+});
+exports.excelUpload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: EXCEL_MAX_SIZE },
+    fileFilter: (_req, file, cb) => {
+        const ext = path_1.default.extname(file.originalname).toLowerCase();
+        if (!EXCEL_TYPES.includes(file.mimetype) &&
+            ext !== ".xlsx" &&
+            ext !== ".xls") {
+            cb(new Error("Only Excel files (.xlsx) are allowed"));
             return;
         }
         cb(null, true);

@@ -19,6 +19,14 @@ import exportRoutes from "./routes/exportRoutes";
 
 const app = express();
 
+// Required when deployed behind nginx / cloud load balancers (X-Forwarded-For).
+const trustProxy =
+  process.env.TRUST_PROXY === "true" ||
+  (process.env.NODE_ENV === "production" && process.env.TRUST_PROXY !== "false");
+if (trustProxy) {
+  app.set("trust proxy", 1);
+}
+
 app.use(
   cors({
     origin: env.clientUrl,

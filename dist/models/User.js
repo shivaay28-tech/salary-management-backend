@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.User = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const enums_1 = require("../types/enums");
+const permissions_1 = require("../types/permissions");
 const userSchema = new mongoose_1.Schema({
     name: { type: String, required: true, trim: true },
     email: {
@@ -54,6 +55,11 @@ const userSchema = new mongoose_1.Schema({
     assignedOfficeIds: [
         { type: mongoose_1.Schema.Types.ObjectId, ref: "Office", default: [] },
     ],
+    permissions: {
+        type: [String],
+        enum: permissions_1.ALL_PERMISSIONS,
+        default: permissions_1.ALL_PERMISSIONS,
+    },
     isActive: { type: Boolean, default: true },
     refreshToken: { type: String, select: false },
 }, { timestamps: true });

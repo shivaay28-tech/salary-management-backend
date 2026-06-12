@@ -44,9 +44,11 @@ const bankDetailsSchema = new mongoose_1.Schema({
     branch: { type: String, required: true },
 }, { _id: false });
 const angadiyaDetailsSchema = new mongoose_1.Schema({
-    angadiyaName: { type: String, required: true },
-    contactNumber: { type: String, required: true },
-    notes: { type: String },
+    name: { type: String, required: true },
+    number: { type: String, required: true },
+    angadiyaNumber: { type: String, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    city: { type: String, required: true },
 }, { _id: false });
 const employeeSchema = new mongoose_1.Schema({
     fullName: { type: String, required: true, trim: true },

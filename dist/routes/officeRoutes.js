@@ -38,12 +38,13 @@ const officeController = __importStar(require("../controllers/officeController")
 const auth_1 = require("../middleware/auth");
 const rbac_1 = require("../middleware/rbac");
 const enums_1 = require("../types/enums");
+const permissions_1 = require("../types/permissions");
 const asyncHandler_1 = require("../utils/asyncHandler");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 router.get("/", (0, asyncHandler_1.asyncHandler)(officeController.listOffices));
 router.get("/:id", (0, asyncHandler_1.asyncHandler)(officeController.getOffice));
 router.post("/", (0, rbac_1.requireRoles)(enums_1.UserRole.SUPER_ADMIN), (0, asyncHandler_1.asyncHandler)(officeController.createOffice));
-router.put("/:id", (0, rbac_1.requireRoles)(enums_1.UserRole.SUPER_ADMIN), (0, asyncHandler_1.asyncHandler)(officeController.updateOffice));
+router.put("/:id", (0, rbac_1.requirePermission)(permissions_1.Permission.OFFICES), (0, asyncHandler_1.asyncHandler)(officeController.updateOffice));
 router.delete("/:id", (0, rbac_1.requireRoles)(enums_1.UserRole.SUPER_ADMIN), (0, asyncHandler_1.asyncHandler)(officeController.deleteOffice));
 exports.default = router;

@@ -44,9 +44,11 @@ const bankDetailsSchema = new mongoose_1.Schema({
     branch: { type: String, required: true },
 }, { _id: false });
 const angadiyaDetailsSchema = new mongoose_1.Schema({
-    angadiyaName: { type: String, required: true },
-    contactNumber: { type: String, required: true },
-    notes: { type: String },
+    name: { type: String, required: true },
+    number: { type: String, required: true },
+    angadiyaNumber: { type: String, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    city: { type: String, required: true },
 }, { _id: false });
 const salaryRecordSchema = new mongoose_1.Schema({
     employeeId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Employee", required: true },
@@ -54,6 +56,9 @@ const salaryRecordSchema = new mongoose_1.Schema({
     month: { type: Number, required: true, min: 1, max: 12 },
     year: { type: Number, required: true, min: 2000 },
     baseSalary: { type: Number, required: true, min: 0 },
+    fullMonthlySalary: { type: Number, min: 0 },
+    payableDays: { type: Number, min: 0 },
+    daysInMonth: { type: Number, min: 0 },
     bonus: { type: Number, default: 0, min: 0 },
     otherAddition: { type: Number, default: 0, min: 0 },
     otherDeduction: { type: Number, default: 0, min: 0 },
@@ -73,6 +78,12 @@ const salaryRecordSchema = new mongoose_1.Schema({
     bankDetails: bankDetailsSchema,
     angadiyaDetails: angadiyaDetailsSchema,
     remarks: { type: String },
+    deferredCarryForward: { type: Number, default: 0, min: 0 },
+    settledDeferredIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: "SalaryRecord" }],
+    carriedToSalaryId: { type: mongoose_1.Schema.Types.ObjectId, ref: "SalaryRecord" },
+    settledWithSalaryId: { type: mongoose_1.Schema.Types.ObjectId, ref: "SalaryRecord" },
+    deferredUntilMonth: { type: Number, min: 1, max: 12 },
+    deferredUntilYear: { type: Number, min: 2000 },
     createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });
 salaryRecordSchema.index({ employeeId: 1, month: 1, year: 1 }, { unique: true });

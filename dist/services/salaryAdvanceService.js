@@ -7,12 +7,14 @@ exports.paySalaryRecord = paySalaryRecord;
 const enums_1 = require("../types/enums");
 const salary_1 = require("../utils/salary");
 const salaryRecalcService_1 = require("./salaryRecalcService");
+const salaryDeferService_1 = require("./salaryDeferService");
 const advanceService_1 = require("./advanceService");
 const advanceService_2 = require("./advanceService");
 function getGrossBeforeAdvance(record) {
     return (record.baseSalary +
         record.bonus +
-        record.otherAddition -
+        record.otherAddition +
+        (record.deferredCarryForward ?? 0) -
         record.otherDeduction);
 }
 async function getSalaryAdvanceSummary(employeeId, record) {
@@ -48,7 +50,7 @@ async function applyAdvanceDeductionToSalary(record, deductionAmount, manual) {
     record.finalSalary = (0, salary_1.calculateFinalSalary)({
         monthlySalary: record.baseSalary,
         bonus: record.bonus,
-        otherAddition: record.otherAddition,
+        otherAddition: record.otherAddition + (record.deferredCarryForward ?? 0),
         otherDeduction: record.otherDeduction,
         advanceDeduction: totalDeduction,
     });
@@ -57,6 +59,9 @@ async function applyAdvanceDeductionToSalary(record, deductionAmount, manual) {
 async function paySalaryRecord(record, advanceDeductionOverride, options) {
     if (record.paidStatus === enums_1.SalaryPaidStatus.PAID) {
         throw new Error("Salary already paid");
+    }
+    if (record.paidStatus !== enums_1.SalaryPaidStatus.PENDING) {
+        throw new Error("Only pending salaries can be paid");
     }
     if (!record.advanceDeductionManual && advanceDeductionOverride === undefined) {
         await (0, salaryRecalcService_1.recalculateSalaryAdvances)(record);
@@ -83,6 +88,7 @@ async function paySalaryRecord(record, advanceDeductionOverride, options) {
         }
     }
     await record.save();
+    await (0, salaryDeferService_1.settleDeferredOnPayment)(record, record.paidDate ?? new Date());
     if (allocations.length > 0) {
         await (0, advanceService_1.applyAdvanceRecoveries)(allocations, {
             employeeId: String(record.employeeId),
