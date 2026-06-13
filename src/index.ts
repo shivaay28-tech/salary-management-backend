@@ -29,11 +29,23 @@ if (trustProxy) {
 
 app.use(
   cors({
-    origin: env.clientUrl,
+    origin(origin, callback) {
+      if (!origin || env.clientUrls.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
   })
 );
 app.use(express.json({ limit: "10mb" }));
+app.use("/api/auth/login", (req, _res, next) => {
+  console.log(
+    `[auth] login attempt email=${req.body?.email ?? "unknown"} origin=${req.headers.origin ?? "none"}`
+  );
+  next();
+});
 app.use(cookieParser());
 app.use(
   rateLimit({
