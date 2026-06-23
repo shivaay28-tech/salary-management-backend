@@ -39,7 +39,7 @@ function toOfficeIdStrings(
 
 function buildTokenPayload(user: {
   _id: { toString(): string };
-  email: string;
+  email?: string;
   role: TokenPayload["role"];
   assignedOfficeIds: Array<
     | string
@@ -49,7 +49,7 @@ function buildTokenPayload(user: {
 }): TokenPayload {
   return {
     userId: user._id.toString(),
-    email: user.email,
+    email: user.email ?? "",
     role: user.role,
     assignedOfficeIds: toOfficeIdStrings(user.assignedOfficeIds),
     permissions: resolvePermissions(user.permissions),

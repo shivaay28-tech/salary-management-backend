@@ -39,10 +39,15 @@ const enums_1 = require("../types/enums");
 const permissions_1 = require("../types/permissions");
 const userSchema = new mongoose_1.Schema({
     name: { type: String, required: true, trim: true },
-    email: {
+    username: {
         type: String,
         required: true,
         unique: true,
+        lowercase: true,
+        trim: true,
+    },
+    email: {
+        type: String,
         lowercase: true,
         trim: true,
     },

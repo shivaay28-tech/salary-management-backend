@@ -28,9 +28,14 @@ function assertSubAdminScope(req, assignedOfficeIds, permissions) {
     }
 }
 const permissionSchema = zod_1.z.array(zod_1.z.enum(permissions_1.ALL_PERMISSIONS));
+const usernameSchema = zod_1.z
+    .string()
+    .min(3)
+    .max(30)
+    .regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores");
 const createUserSchema = zod_1.z.object({
     name: zod_1.z.string().min(2),
-    email: zod_1.z.string().email(),
+    username: usernameSchema,
     password: zod_1.z.string().min(6),
     role: zod_1.z.literal(enums_1.UserRole.SUB_ADMIN),
     assignedOfficeIds: zod_1.z.array(zod_1.z.string()).min(1),
@@ -38,7 +43,7 @@ const createUserSchema = zod_1.z.object({
 });
 const updateUserSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).optional(),
-    email: zod_1.z.string().email().optional(),
+    username: usernameSchema.optional(),
     password: zod_1.z.string().min(6).optional(),
     assignedOfficeIds: zod_1.z.array(zod_1.z.string()).min(1).optional(),
     permissions: permissionSchema.min(1).optional(),
@@ -56,14 +61,15 @@ async function createUser(req, res) {
     if (!parsed.success) {
         throw new errorHandler_1.AppError(parsed.error.issues[0]?.message ?? "Invalid input");
     }
-    const existing = await User_1.User.findOne({ email: parsed.data.email });
+    const username = parsed.data.username.trim().toLowerCase();
+    const existing = await User_1.User.findOne({ username });
     if (existing) {
-        throw new errorHandler_1.AppError("Email already in use", 409);
+        throw new errorHandler_1.AppError("Username already in use", 409);
     }
     assertSubAdminScope(req, parsed.data.assignedOfficeIds, parsed.data.permissions);
     const user = await User_1.User.create({
         name: parsed.data.name,
-        email: parsed.data.email,
+        username,
         password: await (0, password_1.hashPassword)(parsed.data.password),
         role: enums_1.UserRole.SUB_ADMIN,
         assignedOfficeIds: parsed.data.assignedOfficeIds,
@@ -72,7 +78,7 @@ async function createUser(req, res) {
     if (req.user) {
         await (0, auditService_1.logAudit)(req.user, "Sub Admin Created", "users", {
             userId: user._id,
-            email: user.email,
+            username: user.username,
         });
     }
     const result = await User_1.User.findById(user._id)
@@ -96,8 +102,14 @@ async function updateUser(req, res) {
     assertSubAdminScope(req, nextOfficeIds, nextPermissions);
     if (parsed.data.name)
         user.name = parsed.data.name;
-    if (parsed.data.email)
-        user.email = parsed.data.email;
+    if (parsed.data.username) {
+        const username = parsed.data.username.trim().toLowerCase();
+        const taken = await User_1.User.findOne({ username, _id: { $ne: user._id } });
+        if (taken) {
+            throw new errorHandler_1.AppError("Username already in use", 409);
+        }
+        user.username = username;
+    }
     if (parsed.data.assignedOfficeIds) {
         user.assignedOfficeIds = parsed.data.assignedOfficeIds;
     }

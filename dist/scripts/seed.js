@@ -25,24 +25,46 @@ async function dropLegacyIndexes() {
         }
     }
 }
+async function backfillUsernames() {
+    const users = await User_1.User.find({
+        $or: [{ username: { $exists: false } }, { username: null }, { username: "" }],
+    });
+    for (const user of users) {
+        const fromEmail = user.email?.split("@")[0]?.replace(/[^a-zA-Z0-9_]/g, "") ?? "";
+        let base = user.role === enums_1.UserRole.SUPER_ADMIN
+            ? "admin"
+            : fromEmail || user.name.replace(/\s+/g, "_").toLowerCase();
+        if (base.length < 3)
+            base = `${base}user`.slice(0, 30);
+        let candidate = base.slice(0, 30).toLowerCase();
+        let suffix = 1;
+        while (await User_1.User.findOne({ username: candidate, _id: { $ne: user._id } })) {
+            candidate = `${base.slice(0, 27)}_${suffix++}`.toLowerCase();
+        }
+        user.username = candidate;
+        await user.save();
+        console.log(`Set username for ${user.name}: ${candidate}`);
+    }
+}
 async function seed() {
     await (0, db_1.connectDB)();
     await dropLegacyIndexes();
-    const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@salary.local";
+    await backfillUsernames();
+    const adminUsername = process.env.SEED_ADMIN_USERNAME ?? "admin";
     const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "Admin@123";
-    let admin = await User_1.User.findOne({ email: adminEmail });
+    let admin = await User_1.User.findOne({ username: adminUsername });
     if (!admin) {
         admin = await User_1.User.create({
             name: "Super Admin",
-            email: adminEmail,
+            username: adminUsername,
             password: await (0, password_1.hashPassword)(adminPassword),
             role: enums_1.UserRole.SUPER_ADMIN,
             assignedOfficeIds: [],
         });
-        console.log(`Created super admin: ${adminEmail}`);
+        console.log(`Created super admin: ${adminUsername}`);
     }
     else {
-        console.log(`Super admin already exists: ${adminEmail}`);
+        console.log(`Super admin already exists: ${adminUsername}`);
     }
     const sampleOffices = [
         { name: "Office 1", contactNumber: "9876543210" },
@@ -75,7 +97,7 @@ async function seed() {
         }
     }
     console.log("\nSeed complete.");
-    console.log(`Login: ${adminEmail} / ${adminPassword}`);
+    console.log(`Login: ${adminUsername} / ${adminPassword}`);
     process.exit(0);
 }
 seed().catch((err) => {

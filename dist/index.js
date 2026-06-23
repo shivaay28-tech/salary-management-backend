@@ -29,10 +29,20 @@ if (trustProxy) {
     app.set("trust proxy", 1);
 }
 app.use((0, cors_1.default)({
-    origin: env_1.env.clientUrl,
+    origin(origin, callback) {
+        if (!origin || env_1.env.clientUrls.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(null, false);
+    },
     credentials: true,
 }));
 app.use(express_1.default.json({ limit: "10mb" }));
+app.use("/api/auth/login", (req, _res, next) => {
+    console.log(`[auth] login attempt username=${req.body?.username ?? "unknown"} origin=${req.headers.origin ?? "none"}`);
+    next();
+});
 app.use((0, cookie_parser_1.default)());
 app.use((0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,

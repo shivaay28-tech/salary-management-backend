@@ -12,7 +12,7 @@ const jwt_1 = require("../utils/jwt");
 const errorHandler_1 = require("../middleware/errorHandler");
 const permissions_1 = require("../types/permissions");
 const loginSchema = zod_1.z.object({
-    email: zod_1.z.string().email(),
+    username: zod_1.z.string().min(3),
     password: zod_1.z.string().min(6),
 });
 function toOfficeIdStrings(assignedOfficeIds) {
@@ -31,7 +31,7 @@ function toOfficeIdStrings(assignedOfficeIds) {
 function buildTokenPayload(user) {
     return {
         userId: user._id.toString(),
-        email: user.email,
+        email: user.email ?? "",
         role: user.role,
         assignedOfficeIds: toOfficeIdStrings(user.assignedOfficeIds),
         permissions: (0, permissions_1.resolvePermissions)(user.permissions),
@@ -43,6 +43,7 @@ function serializeUser(user) {
             ? user._id.toString()
             : String(user._id),
         name: user.name,
+        username: user.username,
         email: user.email,
         role: user.role,
         assignedOfficeIds: user.assignedOfficeIds,
@@ -54,15 +55,17 @@ async function login(req, res) {
     if (!parsed.success) {
         throw new errorHandler_1.AppError(parsed.error.issues[0]?.message ?? "Invalid input");
     }
-    const user = await User_1.User.findOne({ email: parsed.data.email })
+    const user = await User_1.User.findOne({
+        username: parsed.data.username.trim().toLowerCase(),
+    })
         .select("+password")
         .populate("assignedOfficeIds", "name");
     if (!user || !user.isActive) {
-        throw new errorHandler_1.AppError("Invalid email or password", 401);
+        throw new errorHandler_1.AppError("Invalid username or password", 401);
     }
     const valid = await (0, password_1.comparePassword)(parsed.data.password, user.password);
     if (!valid) {
-        throw new errorHandler_1.AppError("Invalid email or password", 401);
+        throw new errorHandler_1.AppError("Invalid username or password", 401);
     }
     const payload = buildTokenPayload(user);
     const accessToken = (0, jwt_1.signAccessToken)(payload);
