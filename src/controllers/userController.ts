@@ -38,9 +38,15 @@ const permissionSchema = z.array(
   z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]])
 );
 
+const usernameSchema = z
+  .string()
+  .min(3)
+  .max(30)
+  .regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores");
+
 const createUserSchema = z.object({
   name: z.string().min(2),
-  email: z.string().email(),
+  username: usernameSchema,
   password: z.string().min(6),
   role: z.literal(UserRole.SUB_ADMIN),
   assignedOfficeIds: z.array(z.string()).min(1),
@@ -49,7 +55,7 @@ const createUserSchema = z.object({
 
 const updateUserSchema = z.object({
   name: z.string().min(2).optional(),
-  email: z.string().email().optional(),
+  username: usernameSchema.optional(),
   password: z.string().min(6).optional(),
   assignedOfficeIds: z.array(z.string()).min(1).optional(),
   permissions: permissionSchema.min(1).optional(),
@@ -70,9 +76,10 @@ export async function createUser(req: AuthRequest, res: Response): Promise<void>
     throw new AppError(parsed.error.issues[0]?.message ?? "Invalid input");
   }
 
-  const existing = await User.findOne({ email: parsed.data.email });
+  const username = parsed.data.username.trim().toLowerCase();
+  const existing = await User.findOne({ username });
   if (existing) {
-    throw new AppError("Email already in use", 409);
+    throw new AppError("Username already in use", 409);
   }
 
   assertSubAdminScope(
@@ -83,7 +90,7 @@ export async function createUser(req: AuthRequest, res: Response): Promise<void>
 
   const user = await User.create({
     name: parsed.data.name,
-    email: parsed.data.email,
+    username,
     password: await hashPassword(parsed.data.password),
     role: UserRole.SUB_ADMIN,
     assignedOfficeIds: parsed.data.assignedOfficeIds,
@@ -93,7 +100,7 @@ export async function createUser(req: AuthRequest, res: Response): Promise<void>
   if (req.user) {
     await logAudit(req.user, "Sub Admin Created", "users", {
       userId: user._id,
-      email: user.email,
+      username: user.username,
     });
   }
 
@@ -124,7 +131,14 @@ export async function updateUser(req: AuthRequest, res: Response): Promise<void>
   assertSubAdminScope(req, nextOfficeIds, nextPermissions);
 
   if (parsed.data.name) user.name = parsed.data.name;
-  if (parsed.data.email) user.email = parsed.data.email;
+  if (parsed.data.username) {
+    const username = parsed.data.username.trim().toLowerCase();
+    const taken = await User.findOne({ username, _id: { $ne: user._id } });
+    if (taken) {
+      throw new AppError("Username already in use", 409);
+    }
+    user.username = username;
+  }
   if (parsed.data.assignedOfficeIds) {
     user.assignedOfficeIds = parsed.data.assignedOfficeIds as never;
   }

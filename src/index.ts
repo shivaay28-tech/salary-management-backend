@@ -42,7 +42,7 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use("/api/auth/login", (req, _res, next) => {
   console.log(
-    `[auth] login attempt email=${req.body?.email ?? "unknown"} origin=${req.headers.origin ?? "none"}`
+    `[auth] login attempt username=${req.body?.username ?? "unknown"} origin=${req.headers.origin ?? "none"}`
   );
   next();
 });

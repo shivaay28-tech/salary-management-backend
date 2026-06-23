@@ -13,7 +13,7 @@ import { AppError } from "../middleware/errorHandler";
 import { resolvePermissions } from "../types/permissions";
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  username: z.string().min(3),
   password: z.string().min(6),
 });
 
@@ -59,7 +59,8 @@ function buildTokenPayload(user: {
 function serializeUser(user: {
   _id: unknown;
   name: string;
-  email: string;
+  username: string;
+  email?: string;
   role: string;
   assignedOfficeIds: unknown;
   permissions?: TokenPayload["permissions"];
@@ -70,6 +71,7 @@ function serializeUser(user: {
         ? user._id.toString()
         : String(user._id),
     name: user.name,
+    username: user.username,
     email: user.email,
     role: user.role,
     assignedOfficeIds: user.assignedOfficeIds,
@@ -83,17 +85,19 @@ export async function login(req: AuthRequest, res: Response): Promise<void> {
     throw new AppError(parsed.error.issues[0]?.message ?? "Invalid input");
   }
 
-  const user = await User.findOne({ email: parsed.data.email })
+  const user = await User.findOne({
+    username: parsed.data.username.trim().toLowerCase(),
+  })
     .select("+password")
     .populate("assignedOfficeIds", "name");
 
   if (!user || !user.isActive) {
-    throw new AppError("Invalid email or password", 401);
+    throw new AppError("Invalid username or password", 401);
   }
 
   const valid = await comparePassword(parsed.data.password, user.password);
   if (!valid) {
-    throw new AppError("Invalid email or password", 401);
+    throw new AppError("Invalid username or password", 401);
   }
 
   const payload = buildTokenPayload(user);

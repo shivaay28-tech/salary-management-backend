@@ -23,25 +23,51 @@ async function dropLegacyIndexes(): Promise<void> {
   }
 }
 
+async function backfillUsernames(): Promise<void> {
+  const users = await User.find({
+    $or: [{ username: { $exists: false } }, { username: null }, { username: "" }],
+  });
+
+  for (const user of users) {
+    const fromEmail = user.email?.split("@")[0]?.replace(/[^a-zA-Z0-9_]/g, "") ?? "";
+    let base =
+      user.role === UserRole.SUPER_ADMIN
+        ? "admin"
+        : fromEmail || user.name.replace(/\s+/g, "_").toLowerCase();
+    if (base.length < 3) base = `${base}user`.slice(0, 30);
+
+    let candidate = base.slice(0, 30).toLowerCase();
+    let suffix = 1;
+    while (await User.findOne({ username: candidate, _id: { $ne: user._id } })) {
+      candidate = `${base.slice(0, 27)}_${suffix++}`.toLowerCase();
+    }
+
+    user.username = candidate;
+    await user.save();
+    console.log(`Set username for ${user.name}: ${candidate}`);
+  }
+}
+
 async function seed(): Promise<void> {
   await connectDB();
   await dropLegacyIndexes();
+  await backfillUsernames();
 
-  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@salary.local";
+  const adminUsername = process.env.SEED_ADMIN_USERNAME ?? "admin";
   const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "Admin@123";
 
-  let admin = await User.findOne({ email: adminEmail });
+  let admin = await User.findOne({ username: adminUsername });
   if (!admin) {
     admin = await User.create({
       name: "Super Admin",
-      email: adminEmail,
+      username: adminUsername,
       password: await hashPassword(adminPassword),
       role: UserRole.SUPER_ADMIN,
       assignedOfficeIds: [],
     });
-    console.log(`Created super admin: ${adminEmail}`);
+    console.log(`Created super admin: ${adminUsername}`);
   } else {
-    console.log(`Super admin already exists: ${adminEmail}`);
+    console.log(`Super admin already exists: ${adminUsername}`);
   }
 
   const sampleOffices = [
@@ -78,7 +104,7 @@ async function seed(): Promise<void> {
   }
 
   console.log("\nSeed complete.");
-  console.log(`Login: ${adminEmail} / ${adminPassword}`);
+  console.log(`Login: ${adminUsername} / ${adminPassword}`);
   process.exit(0);
 }
 

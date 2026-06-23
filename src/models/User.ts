@@ -4,7 +4,8 @@ import { ALL_PERMISSIONS, Permission } from "../types/permissions";
 
 export interface IUser extends Document {
   name: string;
-  email: string;
+  username: string;
+  email?: string;
   password: string;
   role: UserRole;
   assignedOfficeIds: mongoose.Types.ObjectId[];
@@ -18,10 +19,15 @@ export interface IUser extends Document {
 const userSchema = new Schema<IUser>(
   {
     name: { type: String, required: true, trim: true },
-    email: {
+    username: {
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    email: {
+      type: String,
       lowercase: true,
       trim: true,
     },
