@@ -7,7 +7,7 @@ import { EmployeeStatus } from "../types/enums";
 import { AuthRequest } from "../middleware/auth";
 import { assertOfficeAccess } from "../middleware/rbac";
 import { AppError } from "../middleware/errorHandler";
-import { getOfficeIdFilter } from "../utils/officeFilter";
+import { getOfficeDocumentFilter } from "../utils/officeFilter";
 import { logAudit } from "./auditService";
 
 export const EMPLOYEE_IMPORT_HEADERS = [
@@ -112,14 +112,22 @@ function isRowEmpty(row: ParsedEmployeeRow): boolean {
   return !row.fullName && !row.mobileNumber && !row.officeName && !row.monthlySalary;
 }
 
-export async function sendEmployeeImportTemplate(res: Response): Promise<void> {
+export async function sendEmployeeImportTemplate(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  const offices = await Office.find({ ...getOfficeDocumentFilter(req) })
+    .select("name")
+    .sort({ name: 1 });
+  const sampleOffice = offices[0]?.name ?? "Office 1";
+
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Employees");
   sheet.addRow([...EMPLOYEE_IMPORT_HEADERS]);
   sheet.addRow([
     "Ramesh Patel",
     "9876500001",
-    "Office 1",
+    sampleOffice,
     25000,
     "active",
     "2024-01-15",
@@ -184,10 +192,13 @@ export async function importEmployeesFromExcel(
     );
   }
 
-  const offices = await Office.find({ ...getOfficeIdFilter(req) }).select("name");
+  const offices = await Office.find({ ...getOfficeDocumentFilter(req) })
+    .select("name")
+    .sort({ name: 1 });
   const officeByName = new Map(
     offices.map((office) => [office.name.trim().toLowerCase(), office._id.toString()])
   );
+  const availableOfficeNames = offices.map((office) => office.name).join(", ");
 
   const result: EmployeeImportResult = { created: 0, failed: [] };
 
@@ -229,7 +240,11 @@ export async function importEmployeesFromExcel(
 
     const officeId = officeByName.get(parsed.officeName.trim().toLowerCase());
     if (!officeId) {
-      fail(`Office "${parsed.officeName || "(empty)"}" not found`);
+      fail(
+        availableOfficeNames
+          ? `Office "${parsed.officeName || "(empty)"}" not found. Use one of your assigned offices: ${availableOfficeNames}`
+          : `Office "${parsed.officeName || "(empty)"}" not found. No offices are assigned to your account.`
+      );
       continue;
     }
 

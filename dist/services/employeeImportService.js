@@ -96,14 +96,18 @@ function parseStatus(value) {
 function isRowEmpty(row) {
     return !row.fullName && !row.mobileNumber && !row.officeName && !row.monthlySalary;
 }
-async function sendEmployeeImportTemplate(res) {
+async function sendEmployeeImportTemplate(req, res) {
+    const offices = await Office_1.Office.find({ ...(0, officeFilter_1.getOfficeDocumentFilter)(req) })
+        .select("name")
+        .sort({ name: 1 });
+    const sampleOffice = offices[0]?.name ?? "Office 1";
     const workbook = new exceljs_1.default.Workbook();
     const sheet = workbook.addWorksheet("Employees");
     sheet.addRow([...exports.EMPLOYEE_IMPORT_HEADERS]);
     sheet.addRow([
         "Ramesh Patel",
         "9876500001",
-        "Office 1",
+        sampleOffice,
         25000,
         "active",
         "2024-01-15",
@@ -150,8 +154,11 @@ async function importEmployeesFromExcel(req, fileBuffer) {
     if (missing.length > 0) {
         throw new errorHandler_1.AppError(`Missing required columns: ${missing.join(", ")}. Download the template for the correct format.`, 400);
     }
-    const offices = await Office_1.Office.find({ ...(0, officeFilter_1.getOfficeIdFilter)(req) }).select("name");
+    const offices = await Office_1.Office.find({ ...(0, officeFilter_1.getOfficeDocumentFilter)(req) })
+        .select("name")
+        .sort({ name: 1 });
     const officeByName = new Map(offices.map((office) => [office.name.trim().toLowerCase(), office._id.toString()]));
+    const availableOfficeNames = offices.map((office) => office.name).join(", ");
     const result = { created: 0, failed: [] };
     for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
         const row = sheet.getRow(rowNumber);
@@ -186,7 +193,9 @@ async function importEmployeesFromExcel(req, fileBuffer) {
         }
         const officeId = officeByName.get(parsed.officeName.trim().toLowerCase());
         if (!officeId) {
-            fail(`Office "${parsed.officeName || "(empty)"}" not found`);
+            fail(availableOfficeNames
+                ? `Office "${parsed.officeName || "(empty)"}" not found. Use one of your assigned offices: ${availableOfficeNames}`
+                : `Office "${parsed.officeName || "(empty)"}" not found. No offices are assigned to your account.`);
             continue;
         }
         try {

@@ -129,8 +129,7 @@ async function deleteEmployee(req, res) {
     res.json({ success: true, message: "Employee deleted" });
 }
 async function downloadImportTemplate(req, res) {
-    void req;
-    await (0, employeeImportService_1.sendEmployeeImportTemplate)(res);
+    await (0, employeeImportService_1.sendEmployeeImportTemplate)(req, res);
 }
 async function importEmployees(req, res) {
     if (!req.file) {

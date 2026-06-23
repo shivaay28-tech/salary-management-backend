@@ -19,6 +19,24 @@ export function getOfficeIdFilter(req: AuthRequest): Record<string, unknown> {
   };
 }
 
+/** Filter for Office collection queries (uses `_id`, not `officeId`). */
+export function getOfficeDocumentFilter(req: AuthRequest): Record<string, unknown> {
+  if (!req.user || req.user.role === UserRole.SUPER_ADMIN) {
+    return {};
+  }
+
+  const officeIds = (req.user.assignedOfficeIds ?? []).filter(Boolean);
+  if (officeIds.length === 0) {
+    return { _id: { $in: [] } };
+  }
+
+  return {
+    _id: {
+      $in: officeIds.map((id) => new mongoose.Types.ObjectId(id)),
+    },
+  };
+}
+
 export function getOfficeIdsForQuery(req: AuthRequest): string[] | null {
   if (!req.user || req.user.role === UserRole.SUPER_ADMIN) return null;
   return (req.user.assignedOfficeIds ?? []).filter(Boolean);

@@ -152,8 +152,7 @@ export async function downloadImportTemplate(
   req: AuthRequest,
   res: Response
 ): Promise<void> {
-  void req;
-  await sendEmployeeImportTemplate(res);
+  await sendEmployeeImportTemplate(req, res);
 }
 
 export async function importEmployees(

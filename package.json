@@ -16,6 +16,10 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": "20.x",
+    "npm": "10.x"
+  },
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.0",
@@ -29,9 +33,7 @@
     "mongoose": "^9.6.3",
     "multer": "^2.1.1",
     "pdfkit": "^0.18.0",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
+    "typescript": "^6.0.3",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
@@ -40,8 +42,10 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^25.9.1",
     "@types/pdfkit": "^0.17.6",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
     "nodemon": "^3.1.14",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "tsx": "^4.22.4"
   }
 }
