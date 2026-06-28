@@ -133,19 +133,24 @@ export async function updateEmployee(req: AuthRequest, res: Response): Promise<v
 }
 
 export async function deleteEmployee(req: AuthRequest, res: Response): Promise<void> {
-  const employee = await Employee.findByIdAndDelete(String(req.params.id));
+  const employee = await Employee.findById(String(req.params.id));
   if (!employee) {
     throw new AppError("Employee not found", 404);
   }
   assertOfficeAccess(req, employee.officeId.toString());
 
+  employee.status = EmployeeStatus.INACTIVE;
+  employee.outDate = employee.outDate ?? new Date();
+  await employee.save();
+
   if (req.user) {
-    await logAudit(req.user, "Employee Deleted", "employees", {
+    await logAudit(req.user, "Employee Deactivated", "employees", {
       employeeId: employee._id,
+      outDate: employee.outDate,
     });
   }
 
-  res.json({ success: true, message: "Employee deleted" });
+  res.json({ success: true, message: "Employee deactivated" });
 }
 
 export async function downloadImportTemplate(

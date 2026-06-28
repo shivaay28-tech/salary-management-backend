@@ -99,6 +99,26 @@ export function isEmployeePayableInMonth(
   }).isPayable;
 }
 
+export function isSalaryVisibleForPeriod(
+  employee: ProRataEmployeeDates | null | undefined,
+  month: number,
+  year: number
+): boolean {
+  if (!employee?.dateOfJoining) return false;
+  return isEmployeePayableInMonth(employee, month, year);
+}
+
+export function salaryEmployeeDates(
+  employee: unknown
+): ProRataEmployeeDates | null {
+  if (!employee || typeof employee !== "object" || !("dateOfJoining" in employee)) {
+    return null;
+  }
+  const dates = employee as { dateOfJoining?: Date; outDate?: Date };
+  if (!dates.dateOfJoining) return null;
+  return { dateOfJoining: dates.dateOfJoining, outDate: dates.outDate };
+}
+
 export function calculateProRataBaseSalary(input: ProRataInput): ProRataResult {
   const { monthlySalary, dateOfJoining, outDate, month, year } = input;
   const daysInMonth = getDaysInMonth(month, year);

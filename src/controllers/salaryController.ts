@@ -22,6 +22,7 @@ import {
   deferSalaryRecord,
   skipSalaryRecord,
 } from "../services/salaryDeferService";
+import { isSalaryVisibleForPeriod, salaryEmployeeDates } from "../utils/salary";
 
 const updateSalarySchema = z.object({
   bonus: z.coerce.number().min(0).optional(),
@@ -111,13 +112,18 @@ export async function listSalaries(req: AuthRequest, res: Response): Promise<voi
   if (req.query.employeeId) filter.employeeId = String(req.query.employeeId);
 
   const salaries = await SalaryRecord.find(filter)
-    .populate("employeeId", "fullName monthlySalary dateOfJoining outDate")
+    .populate("employeeId", "fullName monthlySalary dateOfJoining outDate status")
     .populate("officeId", "name")
     .sort({ year: -1, month: -1 });
 
+  const visibleSalaries = salaries.filter((s) => {
+    const dates = salaryEmployeeDates(s.employeeId);
+    return dates ? isSalaryVisibleForPeriod(dates, s.month, s.year) : false;
+  });
+
   const employeeIds = [
     ...new Set(
-      salaries
+      visibleSalaries
         .map((s) => {
           const emp = s.employeeId as
             | { _id?: { toString(): string } }
@@ -158,7 +164,7 @@ export async function listSalaries(req: AuthRequest, res: Response): Promise<voi
     outstandingRows.map((row) => [row._id.toString(), row.outstandingAdvance as number])
   );
 
-  const data = salaries.map((s) => {
+  const data = visibleSalaries.map((s) => {
     const emp = s.employeeId as
       | { _id?: { toString(): string }; fullName?: string }
       | mongoose.Types.ObjectId
@@ -371,9 +377,18 @@ export async function markAllSalariesPaid(
     filter.officeId = parsed.data.officeId;
   }
 
-  const pending = await SalaryRecord.find(filter).sort({ createdAt: 1 });
+  const pending = await SalaryRecord.find(filter)
+    .populate("employeeId", "dateOfJoining outDate")
+    .sort({ createdAt: 1 });
 
-  if (pending.length === 0) {
+  const payablePending = pending.filter((record) => {
+    const dates = salaryEmployeeDates(record.employeeId);
+    return dates
+      ? isSalaryVisibleForPeriod(dates, record.month, record.year)
+      : false;
+  });
+
+  if (payablePending.length === 0) {
     res.json({
       success: true,
       data: { paid: 0, failed: [], message: "No pending salaries to pay" },
@@ -384,7 +399,7 @@ export async function markAllSalariesPaid(
   let paid = 0;
   const failed: { id: string; employeeId: string; error: string }[] = [];
 
-  for (const record of pending) {
+  for (const record of payablePending) {
     try {
       await paySalaryRecord(record, undefined, {
         paymentMode: parsed.data.paymentMode,
@@ -413,7 +428,7 @@ export async function markAllSalariesPaid(
     data: {
       paid,
       failed,
-      total: pending.length,
+      total: payablePending.length,
     },
   });
 }

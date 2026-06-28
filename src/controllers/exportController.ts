@@ -17,6 +17,7 @@ import {
   buildDeferredSalaryStatement,
   buildSkippedSalaryStatement,
 } from "../services/salaryDeferService";
+import { isSalaryVisibleForPeriod, salaryEmployeeDates } from "../utils/salary";
 import type { IEmployee } from "../models/Employee";
 
 type PopulatedEmployeeRef =
@@ -123,7 +124,7 @@ export async function exportSalaryReport(
   }
 
   const allRecords = await SalaryRecord.find(filter)
-    .populate("employeeId", "fullName mobileNumber")
+    .populate("employeeId", "fullName mobileNumber dateOfJoining outDate")
     .populate("officeId", "name")
     .sort({ year: -1, month: -1 });
 
@@ -133,7 +134,12 @@ export async function exportSalaryReport(
     parsed.data.year,
     parsed.data.dateFrom,
     parsed.data.dateTo
-  );
+  ).filter((record) => {
+    const dates = salaryEmployeeDates(record.employeeId);
+    return dates
+      ? isSalaryVisibleForPeriod(dates, record.month, record.year)
+      : false;
+  });
 
   records.sort((a, b) => {
     const nameA =

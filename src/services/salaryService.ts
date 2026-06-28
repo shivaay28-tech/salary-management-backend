@@ -128,10 +128,24 @@ export async function generateMonthlySalaries(
     buildPayableEmployeeFilter(month, year, officeFilter)
   ).lean();
   if (employees.length === 0) {
+    await SalaryRecord.deleteMany({
+      ...officeFilter,
+      month,
+      year,
+      paidStatus: SalaryPaidStatus.PENDING,
+    });
     return { created: 0, skipped: 0 };
   }
 
   const employeeIds = employees.map((employee) => employee._id);
+
+  await SalaryRecord.deleteMany({
+    ...officeFilter,
+    month,
+    year,
+    paidStatus: SalaryPaidStatus.PENDING,
+    employeeId: { $nin: employeeIds },
+  });
 
   const [existingRecords, allAdvances, allDeferred] = await Promise.all([
     SalaryRecord.find({ employeeId: { $in: employeeIds }, month, year }),
