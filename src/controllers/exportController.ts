@@ -17,7 +17,6 @@ import {
   buildDeferredSalaryStatement,
   buildSkippedSalaryStatement,
 } from "../services/salaryDeferService";
-import { isSalaryVisibleForPeriod, salaryEmployeeDates } from "../utils/salary";
 import type { IEmployee } from "../models/Employee";
 
 type PopulatedEmployeeRef =
@@ -134,12 +133,7 @@ export async function exportSalaryReport(
     parsed.data.year,
     parsed.data.dateFrom,
     parsed.data.dateTo
-  ).filter((record) => {
-    const dates = salaryEmployeeDates(record.employeeId);
-    return dates
-      ? isSalaryVisibleForPeriod(dates, record.month, record.year)
-      : false;
-  });
+  );
 
   records.sort((a, b) => {
     const nameA =

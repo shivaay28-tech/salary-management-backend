@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { JAMA_UI } from "../constants/jamaLabels";
+import { Employee } from "../models/Employee";
 import { SalaryRecord, ISalaryRecord } from "../models/SalaryRecord";
 import { SalaryPaidStatus } from "../types/enums";
 import { calculateFinalSalary } from "../utils/salary";
@@ -97,6 +98,134 @@ export async function deferSalaryRecord(
 
   await record.save();
   return record;
+}
+
+export async function createManualDeferredSalary(options: {
+  employeeId: string;
+  month: number;
+  year: number;
+  amount: number;
+  remarks?: string;
+  deferredUntilMonth?: number;
+  deferredUntilYear?: number;
+  createdBy: mongoose.Types.ObjectId;
+}): Promise<ISalaryRecord> {
+  const employee = await Employee.findById(options.employeeId);
+  if (!employee) {
+    throw new Error("Employee not found");
+  }
+
+  const existing = await SalaryRecord.findOne({
+    employeeId: options.employeeId,
+    month: options.month,
+    year: options.year,
+  });
+
+  if (existing) {
+    if (existing.paidStatus === SalaryPaidStatus.PENDING) {
+      existing.baseSalary = options.amount;
+      existing.finalSalary = options.amount;
+      existing.fullMonthlySalary = employee.monthlySalary;
+      return deferSalaryRecord(
+        existing,
+        options.remarks,
+        options.deferredUntilMonth,
+        options.deferredUntilYear
+      );
+    }
+    throw new Error(`Salary for this period is already ${existing.paidStatus}`);
+  }
+
+  const record = await SalaryRecord.create({
+    employeeId: employee._id,
+    officeId: employee.officeId,
+    month: options.month,
+    year: options.year,
+    baseSalary: options.amount,
+    fullMonthlySalary: employee.monthlySalary,
+    finalSalary: options.amount,
+    bonus: 0,
+    otherAddition: 0,
+    otherDeduction: 0,
+    advanceDeduction: 0,
+    advanceDeductionManual: false,
+    paidStatus: SalaryPaidStatus.DEFERRED,
+    remarks: options.remarks,
+    deferredUntilMonth: options.deferredUntilMonth,
+    deferredUntilYear: options.deferredUntilYear,
+    createdBy: options.createdBy,
+  });
+
+  return record;
+}
+
+function nextCalendarMonth(month: number, year: number): { month: number; year: number } {
+  if (month === 12) return { month: 1, year: year + 1 };
+  return { month: month + 1, year };
+}
+
+export async function carryPartialPayRemainder(
+  paidRecord: ISalaryRecord,
+  remainder: number
+): Promise<void> {
+  if (remainder <= 0) return;
+
+  const employeeId = String(paidRecord.employeeId);
+  const createdBy = paidRecord.createdBy as mongoose.Types.ObjectId;
+  const sourceLabel = `${paidRecord.month}/${paidRecord.year}`;
+  const remarks = `Partial payment remainder from ${sourceLabel}`;
+
+  let probe = nextCalendarMonth(paidRecord.month, paidRecord.year);
+
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const existing = await SalaryRecord.findOne({
+      employeeId,
+      month: probe.month,
+      year: probe.year,
+    });
+
+    if (!existing) {
+      await createManualDeferredSalary({
+        employeeId,
+        month: probe.month,
+        year: probe.year,
+        amount: remainder,
+        remarks,
+        createdBy,
+      });
+      return;
+    }
+
+    if (existing.paidStatus === SalaryPaidStatus.PENDING) {
+      existing.deferredCarryForward = (existing.deferredCarryForward ?? 0) + remainder;
+      existing.finalSalary = calculateFinalSalary({
+        monthlySalary: existing.baseSalary,
+        bonus: existing.bonus,
+        otherAddition: existing.otherAddition + (existing.deferredCarryForward ?? 0),
+        otherDeduction: existing.otherDeduction,
+        advanceDeduction: existing.advanceDeduction,
+      });
+      await existing.save();
+      return;
+    }
+
+    if (
+      existing.paidStatus === SalaryPaidStatus.DEFERRED &&
+      !existing.carriedToSalaryId
+    ) {
+      existing.baseSalary += remainder;
+      existing.finalSalary += remainder;
+      existing.remarks = existing.remarks
+        ? `${existing.remarks}; ${remarks}`
+        : remarks;
+      await existing.save();
+      return;
+    }
+
+    probe = nextCalendarMonth(probe.month, probe.year);
+  }
+
+  throw new Error("Could not carry jama remainder — no open month slot found");
 }
 
 export async function skipSalaryRecord(

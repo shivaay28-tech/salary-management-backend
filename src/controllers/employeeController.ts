@@ -6,6 +6,7 @@ import { AuthRequest } from "../middleware/auth";
 import { assertOfficeAccess } from "../middleware/rbac";
 import { AppError } from "../middleware/errorHandler";
 import { logAudit } from "../services/auditService";
+import { refreshEmployeePendingSalaries } from "../services/salaryRecalcService";
 import { saveEmployeePhoto } from "../services/uploadService";
 import {
   importEmployeesFromExcel,
@@ -119,8 +120,17 @@ export async function updateEmployee(req: AuthRequest, res: Response): Promise<v
     assertOfficeAccess(req, parsed.data.officeId);
   }
 
+  const salaryFieldsChanged =
+    parsed.data.monthlySalary !== undefined ||
+    parsed.data.dateOfJoining !== undefined ||
+    parsed.data.outDate !== undefined;
+
   Object.assign(employee, parsed.data);
   await employee.save();
+
+  if (salaryFieldsChanged) {
+    await refreshEmployeePendingSalaries(employee);
+  }
 
   if (req.user) {
     await logAudit(req.user, "Employee Updated", "employees", {

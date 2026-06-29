@@ -1,7 +1,8 @@
+import mongoose from "mongoose";
 import { IAdvance } from "../models/Advance";
 import { SalaryRecord, ISalaryRecord } from "../models/SalaryRecord";
 import { SalaryPaidStatus } from "../types/enums";
-import { calculateFinalSalary } from "../utils/salary";
+import { calculateFinalSalary, calculateProRataBaseSalary } from "../utils/salary";
 import {
   computeAdvanceDeduction,
   getActiveAdvancesForEmployee,
@@ -116,6 +117,45 @@ export async function recalculateSalaryAdvances(
   }
 
   return record;
+}
+
+/** Recompute pending salary rows when employee monthly pay or dates change. */
+export async function refreshEmployeePendingSalaries(employee: {
+  _id: mongoose.Types.ObjectId;
+  monthlySalary: number;
+  dateOfJoining: Date;
+  outDate?: Date | null;
+}): Promise<void> {
+  const { applyDeferredCarryForward } = await import("./salaryDeferService");
+  const pending = await SalaryRecord.find({
+    employeeId: employee._id,
+    paidStatus: SalaryPaidStatus.PENDING,
+  });
+
+  for (const record of pending) {
+    const proRata = calculateProRataBaseSalary({
+      monthlySalary: employee.monthlySalary,
+      dateOfJoining: employee.dateOfJoining,
+      outDate: employee.outDate ?? undefined,
+      month: record.month,
+      year: record.year,
+    });
+
+    record.baseSalary = proRata.baseSalary;
+    record.fullMonthlySalary = proRata.fullMonthlySalary;
+    record.payableDays = proRata.payableDays;
+    record.daysInMonth = proRata.daysInMonth;
+
+    await applyDeferredCarryForward(record);
+
+    if (record.advanceDeductionManual) {
+      recalculateFinalSalaryKeepingAdvance(record);
+    } else {
+      await recalculateSalaryAdvances(record);
+    }
+
+    await record.save();
+  }
 }
 
 export async function recalculatePendingSalaries(

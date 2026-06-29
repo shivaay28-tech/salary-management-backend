@@ -2,6 +2,7 @@ import { Response } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { SalaryRecord } from "../models/SalaryRecord";
+import { Employee } from "../models/Employee";
 import { Advance } from "../models/Advance";
 import { SalaryPaidStatus, SalaryPaymentMode } from "../types/enums";
 import { AuthRequest } from "../middleware/auth";
@@ -19,6 +20,7 @@ import { JAMA_UI } from "../constants/jamaLabels";
 import {
   buildDeferredSalaryStatement,
   buildSkippedSalaryStatement,
+  createManualDeferredSalary,
   deferSalaryRecord,
   skipSalaryRecord,
 } from "../services/salaryDeferService";
@@ -51,6 +53,7 @@ const payAngadiyaSchema = z.object({
 const paySalarySchema = z
   .object({
     advanceDeduction: z.coerce.number().min(0).optional(),
+    paidAmount: z.coerce.number().positive().optional(),
     paymentMode: z.nativeEnum(SalaryPaymentMode),
     bankDetails: payBankSchema.optional(),
     angadiyaDetails: payAngadiyaSchema.optional(),
@@ -89,6 +92,16 @@ const deferSalarySchema = z.object({
 
 const skipSalarySchema = z.object({
   remarks: z.string().min(1, "Reason is required"),
+});
+
+const createManualDeferredSchema = z.object({
+  employeeId: z.string(),
+  month: z.coerce.number().min(1).max(12),
+  year: z.coerce.number().min(2000),
+  amount: z.coerce.number().positive(),
+  remarks: z.string().optional(),
+  deferredUntilMonth: z.coerce.number().min(1).max(12).optional(),
+  deferredUntilYear: z.coerce.number().min(2000).optional(),
 });
 
 const payAllSchema = z.object({
@@ -186,6 +199,51 @@ export async function listSalaries(req: AuthRequest, res: Response): Promise<voi
   });
 
   res.json({ success: true, data });
+}
+
+export async function createManualDeferred(
+  req: AuthRequest,
+  res: Response
+): Promise<void> {
+  const parsed = createManualDeferredSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError(parsed.error.issues[0]?.message ?? "Invalid input");
+  }
+
+  if (!req.user) {
+    throw new AppError("Unauthorized", 401);
+  }
+
+  const employee = await Employee.findById(parsed.data.employeeId);
+  if (!employee) {
+    throw new AppError("Employee not found", 404);
+  }
+  assertOfficeAccess(req, employee.officeId.toString());
+
+  try {
+    const record = await createManualDeferredSalary({
+      ...parsed.data,
+      createdBy: new mongoose.Types.ObjectId(req.user.userId),
+    });
+
+    if (req.user) {
+      await logAudit(req.user, JAMA_UI.auditAction, "salaries", {
+        salaryId: record._id,
+        month: record.month,
+        year: record.year,
+        amount: record.finalSalary,
+        manual: true,
+      });
+    }
+
+    const result = await SalaryRecord.findById(record._id)
+      .populate("employeeId", "fullName")
+      .populate("officeId", "name");
+
+    res.status(201).json({ success: true, data: result });
+  } catch (err) {
+    throw new AppError(err instanceof Error ? err.message : JAMA_UI.deferFailed, 400);
+  }
 }
 
 export async function getSalaryAdvanceInfo(
@@ -333,6 +391,7 @@ export async function markSalaryPaid(req: AuthRequest, res: Response): Promise<v
       paymentMode: parsed.data.paymentMode,
       bankDetails: parsed.data.bankDetails,
       angadiyaDetails: parsed.data.angadiyaDetails,
+      paidAmount: parsed.data.paidAmount,
     });
   } catch (err) {
     throw new AppError(err instanceof Error ? err.message : "Payment failed", 400);

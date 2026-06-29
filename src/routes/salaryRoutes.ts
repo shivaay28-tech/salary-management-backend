@@ -22,6 +22,8 @@ router.get(
 
 router.use(requirePermission(Permission.SALARIES));
 
+router.post("/deferred", asyncHandler(salaryController.createManualDeferred));
+
 router.get("/", asyncHandler(salaryController.listSalaries));
 router.post("/generate", asyncHandler(salaryController.generateSalaries));
 router.post("/pay-all", asyncHandler(salaryController.markAllSalariesPaid));

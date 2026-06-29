@@ -6,7 +6,7 @@ import {
 import { SalaryPaidStatus, SalaryPaymentMode } from "../types/enums";
 import { calculateFinalSalary } from "../utils/salary";
 import { recalculateSalaryAdvances } from "./salaryRecalcService";
-import { settleDeferredOnPayment } from "./salaryDeferService";
+import { settleDeferredOnPayment, carryPartialPayRemainder } from "./salaryDeferService";
 import { applyAdvanceRecoveries } from "./advanceService";
 import {
   computeAdvanceDeduction,
@@ -83,11 +83,11 @@ export async function applyAdvanceDeductionToSalary(
   return { allocations };
 }
 
-/** Mark one salary paid using saved (or overridden) advance deduction. */
 export interface PaySalaryOptions {
   paymentMode: SalaryPaymentMode;
   bankDetails?: ISalaryBankDetails;
   angadiyaDetails?: ISalaryAngadiyaDetails;
+  paidAmount?: number;
 }
 
 export async function paySalaryRecord(
@@ -117,6 +117,19 @@ export async function paySalaryRecord(
     true
   );
 
+  const netSalary = record.finalSalary;
+  const paidAmount = options?.paidAmount ?? netSalary;
+  if (paidAmount <= 0 || paidAmount > netSalary) {
+    throw new Error(
+      paidAmount <= 0
+        ? "Payment amount must be greater than zero"
+        : `Payment amount cannot exceed net salary (${netSalary})`
+    );
+  }
+
+  const remainder = netSalary - paidAmount;
+  record.finalSalary = paidAmount;
+
   record.paidStatus = SalaryPaidStatus.PAID;
   record.paidDate = new Date();
   if (options?.paymentMode) {
@@ -134,6 +147,10 @@ export async function paySalaryRecord(
   }
   await record.save();
   await settleDeferredOnPayment(record, record.paidDate ?? new Date());
+
+  if (remainder > 0) {
+    await carryPartialPayRemainder(record, remainder);
+  }
 
   if (allocations.length > 0) {
     await applyAdvanceRecoveries(allocations, {
